@@ -19,10 +19,4 @@ stardoc_with_diff_test(
     renderer = "renderer",
 )
 
-stardoc_with_diff_test(
-    name = "apt_macro",
-    bzl_library_target = "@rules_distroless//apt:apt",
-    renderer = "renderer",
-)
-
 update_docs(name = "update")
