@@ -54,7 +54,7 @@ bazel_dep(name = "rules_distroless", version = "0.5.1")
 
 git_override(
     module_name = "rules_distroless",
-    remote = "https://github.com/GoogleContainerTools/rules_distroless.git",
+    remote = "https://github.com/bazel-contrib/rules_distroless.git",
     commit = "a69bc1949d5daf2d1b0906890667d69b0897688b",
 )
 ```
@@ -117,7 +117,7 @@ check the following docs:
 [`archive_override`]: https://bazel.build/versions/6.0.0/rules/lib/globals#archive_override
 [`local_path_override`]: https://bazel.build/versions/6.0.0/rules/lib/globals#local_path_override
 [Bzlmod migration guide]: https://bazel.build/external/migration
-[`rules_distroless` Github releases page]: https://github.com/GoogleContainerTools/rules_distroless/releases
+[`rules_distroless` Github releases page]: https://github.com/bazel-contrib/rules_distroless/releases
 [Update on the future stability of source code archives and hashes]: https://github.blog/2023-02-21-update-on-the-future-stability-of-source-code-archives-and-hashes
-[Google's `distroless` container images]: https://github.com/GoogleContainerTools/distroless
+[Google's `distroless` container images]: https://github.com/bazel-contrib/distroless
 [Arize AI]: https://www.arize.com

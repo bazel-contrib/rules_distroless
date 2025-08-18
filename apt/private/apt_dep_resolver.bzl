@@ -58,7 +58,7 @@ def _resolve_package(state, name, version, arch):
 
                 # Since versions are ordered by hight to low, the first satisfied version will be
                 # the highest version and rules_distroless ignores Priority field so it's safe.
-                # TODO: rethink this `break` with https://github.com/GoogleContainerTools/rules_distroless/issues/34
+                # TODO: rethink this `break` with https://github.com/bazel-contrib/rules_distroless/issues/34
                 break
     elif len(versions) > 0:
         # First element in the versions list is the latest version.
