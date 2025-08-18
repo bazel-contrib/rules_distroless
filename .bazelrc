@@ -18,7 +18,7 @@ build --java_runtime_version=remotejdk_11
 
 # Newer versions jdk creates collisions on /tmp
 # See: https://github.com/bazelbuild/bazel/issues/3236
-# https://github.com/GoogleContainerTools/rules_distroless/actions/runs/7118944984/job/19382981899?pr=9#step:8:51
+# https://github.com/bazel-contrib/rules_distroless/actions/runs/7118944984/job/19382981899?pr=9#step:8:51
 common:linux --sandbox_tmpfs_path=/tmp
 
 

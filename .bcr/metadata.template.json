@@ -1,5 +1,5 @@
 {
-  "homepage": "https://github.com/GoogleContainerTools/rules_distroless",
+  "homepage": "https://github.com/bazel-contrib/rules_distroless",
   "maintainers": [
     {
       "email": "appu@google.com",
@@ -12,7 +12,7 @@
       "name": "Şahin Yort"
     }
   ],
-  "repository": ["github:GoogleContainerTools/rules_distroless"],
+  "repository": ["github:bazel-contrib/rules_distroless"],
   "versions": [],
   "yanked_versions": {}
 }
