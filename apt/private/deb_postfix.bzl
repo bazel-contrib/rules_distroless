@@ -12,7 +12,6 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
             $(ZSTD_BIN) --compress --format=gzip "$$data_file" > "$$layer"
         ;;
         *data.tar.xz|*data.tar.zst|*data.tar.lzma)
-            realpath "$$data_file"
             $(ZSTD_BIN) --force --decompress --stdout "$$data_file" |
             $(ZSTD_BIN) --compress --format=gzip - > "$$layer"
         ;;
