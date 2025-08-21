@@ -1,6 +1,6 @@
 "home"
 
-load("@tar.bzl", "tar")
+load("@tar.bzl//tar:tar.bzl", "tar")
 load(":tar.bzl", "tar_lib")
 load(":util.bzl", "util")
 

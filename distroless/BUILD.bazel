@@ -18,10 +18,3 @@ bzl_library(
         "//distroless/private:passwd",
     ],
 )
-
-bzl_library(
-    name = "toolchains",
-    srcs = ["toolchains.bzl"],
-    visibility = ["//visibility:public"],
-    deps = ["@aspect_bazel_lib//lib:repositories"],
-)
