@@ -1,4 +1,4 @@
-load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@aspect_bazel_lib//:bzl_library.bzl", "bzl_library")
 load("@rules_java//java:defs.bzl", "java_binary")
 
 exports_files([
@@ -37,7 +37,7 @@ bzl_library(
     visibility = ["//distroless:__subpackages__"],
     deps = [
         "@aspect_bazel_lib//lib:expand_template",
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar.bzl",
         "@aspect_bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
     ],
@@ -49,7 +49,7 @@ bzl_library(
     visibility = ["//distroless:__subpackages__"],
     deps = [
         "@aspect_bazel_lib//lib:expand_template",
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar.bzl",
         "@aspect_bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
     ],
@@ -62,7 +62,7 @@ bzl_library(
     deps = [
         ":util",
         "@aspect_bazel_lib//lib:expand_template",
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar.bzl",
         "@aspect_bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
     ],
@@ -82,7 +82,7 @@ bzl_library(
     deps = [
         ":tar",
         ":util",
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar.bzl",
     ],
 )
 
@@ -101,7 +101,7 @@ bzl_library(
         "//distroless:__subpackages__",
     ],
     deps = [
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar.bzl",
         "@bazel_skylib//lib:sets",
     ],
 )

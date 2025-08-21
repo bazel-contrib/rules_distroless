@@ -1,4 +1,4 @@
-load("@aspect_bazel_lib//lib:tar.bzl", "tar")
+load("@tar.bzl", "tar")
 load("//distroless:defs.bzl", "flatten", "home", "passwd")
 load("//distroless/tests:asserts.bzl", "assert_tar_listing", "assert_tar_mtree")
 
