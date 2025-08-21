@@ -26,7 +26,12 @@ def _distroless_extension(module_ctx):
                     # buildifier: disable=print
                     print("\nNo lockfile was given, please run `bazel run @%s//:lock` to create the lockfile." % install.name)
             else:
-                lockf = lockfile.from_json(module_ctx, module_ctx.read(install.lock))
+                if module_ctx.path(install.lock).exists:
+                    lockf = lockfile.from_json(module_ctx, module_ctx.read(install.lock))
+                else:
+                    # buildifier: disable=print
+                    print("\nSpecified lockfile '%s' not found. An empty lockfile is assumed." % install.lock)
+                    lockf = lockfile.from_json(module_ctx, None)
                 reproducible = True
 
             for (package) in lockf.packages():
