@@ -5,7 +5,7 @@ set -o pipefail -o errexit -o nounset
 lock=$(realpath "$1")
 autofix=${{2:-}}
 
-cd "$BUILD_WORKING_DIRECTORY"
+cd "$BUILD_WORKSPACE_DIRECTORY"
 
 echo
 echo "Writing lockfile to {workspace_relative_path}"
