@@ -96,6 +96,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "deb_postfix",
+    srcs = ["deb_postfix.bzl"],
+    visibility = ["//apt:__subpackages__"],
+)
+
+bzl_library(
     name = "starlark_codegen_utils",
     srcs = ["starlark_codegen_utils.bzl"],
     visibility = ["//apt:__subpackages__"],

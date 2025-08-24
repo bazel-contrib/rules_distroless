@@ -5,7 +5,6 @@ exports_files(["defs.bzl"])
 
 bzl_library(
     name = "dependencies",
-    srcs = ["dependencies.bzl"],
     visibility = ["//visibility:public"],
     deps = [
         "@bazel_tools//tools/build_defs/repo:http.bzl",

@@ -27,9 +27,7 @@ jobs:
         ]
       exclude: |
         [
-          {"folder": ".", "bzlmodEnabled": false},
-          {"folder": "docs", "bzlmodEnabled": false},
           {"folder": "docs", "bazelVersion": "7.0.0"},
-          {"folder": "e2e/smoke", "bzlmodEnabled": false},
           {"os": "windows-latest"},
+          {"bzlmodEnabled": false},
         ]
