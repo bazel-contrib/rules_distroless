@@ -99,13 +99,12 @@ def _parse_repository(state, contents, roots):
             if len(split) == 2:
                 value = split[1]
 
-            if not last_key and len(pkg) == 0 and key != "Package":
-                fail("Invalid debian package index format. Expected 'Package' as first key, got '{}'".format(key))
-
             last_key = key
             pkg[key] = value
 
         if len(pkg.keys()) != 0:
+            if "Package" not in pkg:
+                fail("Invalid debian package index format. No 'Package' key found in entry: {}".format(pkg))
             pkg["Roots"] = roots
             _add_package(state, pkg)
             last_key = ""
