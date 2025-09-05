@@ -1,4 +1,4 @@
-load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@aspect_bazel_lib//:bzl_library.bzl", "bzl_library")
 
 exports_files([
     "dpkg_statusd.sh",
@@ -93,6 +93,12 @@ bzl_library(
     srcs = ["version_constraint.bzl"],
     visibility = ["//apt:__subpackages__"],
     deps = [":version"],
+)
+
+bzl_library(
+    name = "deb_postfix",
+    srcs = ["deb_postfix.bzl"],
+    visibility = ["//apt:__subpackages__"],
 )
 
 bzl_library(

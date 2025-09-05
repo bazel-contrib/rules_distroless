@@ -28,6 +28,8 @@ common --experimental_repository_downloader_retries=10
 # Unflip this flag for now, it fails on Bazel 8
 common --noincompatible_disallow_empty_glob
 
+test --test_output=errors
+
 # Load any settings specific to the current user.
 # .bazelrc.user should appear in .gitignore so that settings are not shared with team members
 # This needs to be last statement in this
