@@ -97,6 +97,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         if dependency_group_idx > -1 and dependency_group[dependency_group_idx][0]:
             continue
 
+        # TODO: only resolve in specified suites
         package = _resolve_package(state, name, version, arch)
 
         # If this package is not found and is part of a dependency group, then just skip it.

@@ -13,6 +13,8 @@ def _set_dict(struct, value = None, keys = []):
 def _get_dict(struct, keys = [], default_value = None):
     value = struct
     for k in keys:
+        if type(k) != "string":
+            fail("Invalid key type: {} {}".format(type(k), k))
         if k in value:
             value = value[k]
         else:
@@ -21,7 +23,7 @@ def _get_dict(struct, keys = [], default_value = None):
     return value
 
 def _sanitize(str):
-    return str.replace("+", "-p-").replace(":", "-").replace("~", "_")
+    return str.removeprefix("/").replace("+", "-").replace(":", "-").replace("~", "_").replace("/", "_").replace("=", "_")
 
 def _get_repo_name(st):
     if st.find("+") != -1:
