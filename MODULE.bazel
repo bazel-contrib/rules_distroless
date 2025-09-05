@@ -15,13 +15,6 @@ bazel_dep(name = "rules_shell", version = "0.4.1")
 bazel_lib_toolchains = use_extension("@aspect_bazel_lib//lib:extensions.bzl", "toolchains")
 use_repo(bazel_lib_toolchains, "zstd_toolchains")
 use_repo(bazel_lib_toolchains, "bsd_tar_toolchains")
-use_repo(bazel_lib_toolchains, "yq_darwin_amd64")
-use_repo(bazel_lib_toolchains, "yq_darwin_arm64")
-use_repo(bazel_lib_toolchains, "yq_linux_amd64")
-use_repo(bazel_lib_toolchains, "yq_linux_arm64")
-use_repo(bazel_lib_toolchains, "yq_linux_ppc64le")
-use_repo(bazel_lib_toolchains, "yq_linux_s390x")
-use_repo(bazel_lib_toolchains, "yq_windows_amd64")
 
 # Dev dependencies
 bazel_dep(name = "gazelle", version = "0.34.0", dev_dependency = True, repo_name = "bazel_gazelle")
@@ -58,39 +51,90 @@ apt = use_extension(
     "apt",
     dev_dependency = True,
 )
-apt.install(
-    name = "bullseye",
-    lock = "//examples/debian_snapshot:bullseye.lock.json",
-    manifest = "//examples/debian_snapshot:bullseye.yaml",
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = [
+        "noble",
+        "noble-security",
+        "noble-updates",
+    ],
+    types = ["deb"],
+    uris = [
+        "https://snapshot.ubuntu.com/ubuntu/20240301T030400Z",
+        "mirror+https://snapshot.ubuntu.com/ubuntu/20240301T030400Z",
+    ],
+    # TODO: signed_by
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["cloud-sdk"],
+    types = ["deb"],
+    uris = ["https://packages.cloud.google.com/apt"],
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["cloud-sdk"],
+    types = ["deb"],
+    uris = ["https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+        "i386",
+    ],
+    components = ["main"],
+    suites = [
+        "bookworm",
+        "bookworm-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20240210T223313Z"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+        "i386",
+    ],
+    components = ["main"],
+    suites = ["bookworm-security"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian-security/20240210T223313Z"],
 )
 apt.install(
-    name = "bullseye_nolock",
-    manifest = "//examples/debian_snapshot:bullseye.yaml",
-    nolock = True,
+    # dependency_set isolates these installs into their own scope.
+    # installing onto default dependency_set only allowed in the
+    # root module
+    dependency_set = "bookworm",
+    packages = [
+        "base-files",
+        "coreutils:arm64",
+        "google-cloud-cli:amd64",
+        "libncurses6",
+        "libstdc++6:i386",
+        "ncurses-base",
+        "tzdata",
+    ],
+    suites = [
+        "bookworm",
+        "bookworm-updates",
+        "bookworm-security",
+        "cloud-sdk",
+    ],
 )
-apt.install(
-    name = "noble",
-    lock = "//examples/ubuntu_snapshot:noble.lock.json",
-    manifest = "//examples/ubuntu_snapshot:noble.yaml",
-)
-apt.install(
-    name = "resolution_test",
-    manifest = "apt/tests/resolution/security.yaml",
-    nolock = True,
-)
-apt.install(
-    name = "resolution_test_empty_lock",
-    lock = "//apt/tests/resolution:empty.lock.json",
-    manifest = "apt/tests/resolution/security.yaml",
-)
-apt.install(
-    name = "arch_all_test",
-    manifest = "apt/tests/resolution/arch_all.yaml",
-    nolock = True,
-)
-apt.install(
-    name = "clang",
-    manifest = "apt/tests/resolution/clang.yaml",
-    nolock = True,
-)
-use_repo(apt, "arch_all_test", "arch_all_test_resolve", "bullseye", "bullseye_nolock", "clang", "noble", "resolution_test", "resolution_test_empty_lock_resolve", "resolution_test_resolve")
+use_repo(apt, "bookworm")
+
+# TODO: support this style of source_list
+#
+# apt.sources_list(
+#     sources = [
+#         "deb [arch=amd64,arm64] https://snapshot.ubuntu.com/ubuntu/20240301T030400Z noble main",
+#         "deb [arch=amd64,arm64] https://snapshot.ubuntu.com/ubuntu/20240301T030400Z noble-security main",
+#         "deb [arch=amd64,arm64] https://snapshot.ubuntu.com/ubuntu/20240301T030400Z noble-updates main",
+#     ],
+# )
+#
