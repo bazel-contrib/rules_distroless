@@ -67,44 +67,90 @@ apt = use_extension(
     "apt",
     dev_dependency = True,
 )
-apt.install(
-    name = "bullseye",
-    lock = "//examples/debian_snapshot:bullseye.lock.json",
-    manifest = "//examples/debian_snapshot:bullseye.yaml",
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = [
+        "noble",
+        "noble-security",
+        "noble-updates",
+    ],
+    types = ["deb"],
+    uris = [
+        "https://snapshot.ubuntu.com/ubuntu/20240301T030400Z",
+        "mirror+https://snapshot.ubuntu.com/ubuntu/20240301T030400Z",
+    ],
+    # TODO: signed_by
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["cloud-sdk"],
+    types = ["deb"],
+    uris = ["https://packages.cloud.google.com/apt"],
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["cloud-sdk"],
+    types = ["deb"],
+    uris = ["https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+        "i386",
+    ],
+    components = ["main"],
+    suites = [
+        "bookworm",
+        "bookworm-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20240210T223313Z"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+        "i386",
+    ],
+    components = ["main"],
+    suites = ["bookworm-security"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian-security/20240210T223313Z"],
 )
 apt.install(
-    name = "bullseye_nolock",
-    manifest = "//examples/debian_snapshot:bullseye.yaml",
-    nolock = True,
+    # dependency_set isolates these installs into their own scope.
+    # installing onto default dependency_set only allowed in the
+    # root module
+    dependency_set = "bookworm",
+    packages = [
+        "base-files",
+        "coreutils:arm64",
+        "google-cloud-cli:amd64",
+        "libncurses6",
+        "libstdc++6:i386",
+        "ncurses-base",
+        "tzdata",
+    ],
+    suites = [
+        "bookworm",
+        "bookworm-updates",
+        "bookworm-security",
+        "cloud-sdk",
+    ],
 )
-apt.install(
-    name = "noble",
-    lock = "//examples/ubuntu_snapshot:noble.lock.json",
-    manifest = "//examples/ubuntu_snapshot:noble.yaml",
-)
-apt.install(
-    name = "resolution_test",
-    manifest = "apt/tests/resolution/security.yaml",
-    nolock = True,
-)
-apt.install(
-    name = "resolution_test_empty_lock",
-    lock = "//apt/tests/resolution:empty.lock.json",
-    manifest = "apt/tests/resolution/security.yaml",
-)
-apt.install(
-    name = "arch_all_test",
-    manifest = "apt/tests/resolution/arch_all.yaml",
-    nolock = True,
-)
-apt.install(
-    name = "unique_dependencies",
-    manifest = "//apt/tests/resolution:dependencies.yaml",
-    nolock = True,
-)
-apt.install(
-    name = "clang",
-    manifest = "apt/tests/resolution/clang.yaml",
-    nolock = True,
-)
-use_repo(apt, "arch_all_test", "arch_all_test_resolve", "bullseye", "bullseye_nolock", "clang", "noble", "resolution_test", "resolution_test_empty_lock_resolve", "resolution_test_resolve", "unique_dependencies_resolve")
+use_repo(apt, "bookworm")
+
+# TODO: support this style of source_list
+#
+# apt.sources_list(
+#     sources = [
+#         "deb [arch=amd64,arm64] https://snapshot.ubuntu.com/ubuntu/20240301T030400Z noble main",
+#         "deb [arch=amd64,arm64] https://snapshot.ubuntu.com/ubuntu/20240301T030400Z noble-security main",
+#         "deb [arch=amd64,arm64] https://snapshot.ubuntu.com/ubuntu/20240301T030400Z noble-updates main",
+#     ],
+# )
+#

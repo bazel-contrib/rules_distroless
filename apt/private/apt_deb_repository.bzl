@@ -48,7 +48,7 @@ def _fetch_package_index(rctx, urls, dist, comp, arch, integrity):
             )
             decompress_r = None
             if download.success:
-                decompress_r = rctx.execute(cmd + [output])
+                decompress_r = mctx.execute(cmd + [output])
                 if decompress_r.return_code == 0:
                     integrity = download.integrity
                     break
@@ -70,14 +70,14 @@ def _fetch_package_index(rctx, urls, dist, comp, arch, integrity):
             attempt_messages.append("""\n*) Failed '{}'\n\n{}""".format(failed_url, reason))
 
         fail("""
-** Tried to download {} different package indices and all failed. 
+** Tried to download {} different package indices and all failed.
 
 {}
         """.format(len(failed_attempts), "\n".join(attempt_messages)))
 
     return ("{}/Packages".format(target_triple), url, integrity)
 
-def _parse_repository(state, contents, roots):
+def _parse_repository(state, contents, roots, dist):
     last_key = ""
     pkg = {}
     for group in contents.split("\n\n"):
@@ -106,6 +106,7 @@ def _parse_repository(state, contents, roots):
             if "Package" not in pkg:
                 fail("Invalid debian package index format. No 'Package' key found in entry: {}".format(pkg))
             pkg["Roots"] = roots
+            pkg["Dist"] = dist
             _add_package(state, pkg)
             last_key = ""
             pkg = {}
@@ -160,29 +161,38 @@ def _package_versions(state, name, arch):
 def _package(state, name, version, arch):
     return util.get_dict(state.packages, keys = (arch, name, version))
 
-def _create(rctx, sources, archs):
+def _fetch_and_parse_sources(state):
+    mctx = state.mctx
+    for source in state.sources:
+        (urls, dist, components, architectures) = source
+
+        for arch in architectures:
+            for comp in components:
+                # We assume that `url` does not contain a trailing forward slash when passing to
+                # functions below. If one is present, remove it. Some HTTP servers do not handle
+                # redirects properly when a path contains "//"
+                # (ie. https://mymirror.com/ubuntu//dists/noble/stable/... may return a 404
+                # on misconfigured HTTP servers)
+                urls = [url.rstrip("/") for url in urls]
+
+                # TODO: make parallel
+                mctx.report_progress("Fetching package index: {}/{} for {}".format(dist, comp, arch))
+                (output, _, _) = _fetch_package_index(mctx, urls, dist, comp, arch, "")
+
+                mctx.report_progress("Parsing package index: {}/{} for {}".format(dist, comp, arch))
+                _parse_repository(state, mctx.read(output), urls, dist)
+
+def _create(mctx):
     state = struct(
+        mctx = mctx,
+        sources = list(),
         packages = dict(),
         virtual_packages = dict(),
     )
 
-    for arch in archs:
-        for (urls, dist, comp) in sources:
-            # We assume that `url` does not contain a trailing forward slash when passing to
-            # functions below. If one is present, remove it. Some HTTP servers do not handle
-            # redirects properly when a path contains "//"
-            # (ie. https://mymirror.com/ubuntu//dists/noble/stable/... may return a 404
-            # on misconfigured HTTP servers)
-            urls = [url.rstrip("/") for url in urls]
-
-            rctx.report_progress("Fetching package index: {}/{} for {}".format(dist, comp, arch))
-            (output, _, _) = _fetch_package_index(rctx, urls, dist, comp, arch, "")
-
-            # TODO: this is expensive to perform.
-            rctx.report_progress("Parsing package index: {}/{} for {}".format(dist, comp, arch))
-            _parse_repository(state, rctx.read(output), urls)
-
     return struct(
+        add_source = lambda source: state.sources.append(source),
+        fetch_and_parse = lambda: _fetch_and_parse_sources(state),
         package_versions = lambda **kwargs: _package_versions(state, **kwargs),
         virtual_packages = lambda **kwargs: _virtual_packages(state, **kwargs),
         package = lambda **kwargs: _package(state, **kwargs),

@@ -9,9 +9,8 @@ load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
 deb_postfix(
     name = "data",
     srcs = glob(["data.tar*"]),
-    outs = ["layer.tar.gz"],
-    mergedusr = {},
-
+    outs = ["content.tar.gz"],
+    mergedusr = {mergedusr},
     visibility = ["//visibility:public"],
 )
 
@@ -20,10 +19,21 @@ filegroup(
     srcs = glob(["control.tar.*"]),
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "{target_name}",
+    srcs = {depends_on} + [":data"],
+    visibility = ["//visibility:public"],
+)
 '''
 
-def deb_import(mergedusr = False, **kwargs):
+def deb_import(name, depends_on = [], mergedusr = False, **kwargs):
     http_archive(
-        build_file_content = _DEB_IMPORT_BUILD_TMPL.format(mergedusr),
+        build_file_content = _DEB_IMPORT_BUILD_TMPL.format(
+            mergedusr = mergedusr,
+            depends_on = depends_on,
+            target_name = name,
+        ),
+        name = name,
         **kwargs
     )
