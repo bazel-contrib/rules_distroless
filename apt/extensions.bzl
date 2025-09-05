@@ -1,10 +1,31 @@
 "apt extensions"
 
-load("@bazel_features//:features.bzl", "bazel_features")
+load("//apt/private:apt_deb_repository.bzl", "deb_repository")
+load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
 load("//apt/private:deb_import.bzl", "deb_import")
-load("//apt/private:deb_resolve.bzl", "deb_resolve", "internal_resolve")
-load("//apt/private:deb_translate_lock.bzl", "deb_translate_lock")
 load("//apt/private:lockfile.bzl", "lockfile")
+load("//apt/private:translate_dependency_set.bzl", "translate_dependency_set")
+load("//apt/private:util.bzl", "util")
+load("//apt/private:version_constraint.bzl", "version_constraint")
+
+# https://wiki.debian.org/SupportedArchitectures
+ALL_SUPPORTED_ARCHES = ["armel", "armhf", "arm64", "i386", "amd64", "mips64el", "ppc64el", "x390x"]
+
+def _parse_source(src):
+    parts = src.split(" ")
+    kind = parts.pop(0)
+    if parts[0].startswith("["):
+        # skip arch for now.
+        arch = parts.pop(0)
+    url = parts.pop(0)
+    dist = parts.pop(0)
+    components = parts
+    return struct(
+        kind = kind,
+        url = url,
+        dist = dist,
+        components = components,
+    )
 
 def _distroless_extension(module_ctx):
     root_direct_deps = []
@@ -12,67 +33,123 @@ def _distroless_extension(module_ctx):
     reproducible = False
 
     for mod in module_ctx.modules:
+        deb_repo = deb_repository.new(module_ctx)
+        resolver = dependency_resolver.new(deb_repo)
+        lockf = lockfile.empty(module_ctx)
+
+        for sl in mod.tags.sources_list:
+            uris = [uri.removeprefix("mirror+") for uri in sl.uris]
+            architectures = sl.architectures
+
+            for suite in sl.suites:
+                lockf.add_source(
+                    suite,
+                    uris = uris,
+                    types = sl.types,
+                    components = sl.components,
+                    architectures = architectures,
+                )
+                deb_repo.add_source(
+                    (uris, suite, sl.components, architectures),
+                )
+
+        deb_repo.fetch_and_parse()
+
+        sources = lockf.sources()
+        dependency_sets = lockf.dependency_sets()
         for install in mod.tags.install:
-            lockf = None
-            if not install.lock:
-                lockf = internal_resolve(
-                    module_ctx,
-                    "yq",
-                    install.manifest,
-                    install.resolve_transitive,
-                )
+            dependency_set = dependency_sets.setdefault(install.dependency_set, {
+                "sets": {},
+            })
+            for dep_constraint in install.packages:
+                constraint = version_constraint.parse_dep(dep_constraint)
 
-                if not install.nolock:
-                    # buildifier: disable=print
-                    print("\nNo lockfile was given, please run `bazel run @%s//:lock` to create the lockfile." % install.name)
-            else:
-                lockf = lockfile.from_json(module_ctx, module_ctx.read(install.lock))
-                reproducible = True
+                architectures = []
 
-            for (package) in lockf.packages():
-                package_key = lockfile.make_package_key(
-                    package["name"],
-                    package["version"],
-                    package["arch"],
-                )
-
-                deb_import(
-                    name = "%s_%s" % (install.name, package_key),
-                    urls = package["urls"],
-                    sha256 = package["sha256"],
-                    mergedusr = install.mergedusr,
-                )
-
-            deb_resolve(
-                name = install.name + "_resolve",
-                manifest = install.manifest,
-                resolve_transitive = install.resolve_transitive,
-            )
-
-            deb_translate_lock(
-                name = install.name,
-                lock = install.lock,
-                lock_content = lockf.as_json(),
-                package_template = install.package_template,
-            )
-
-            if mod.is_root:
-                if module_ctx.is_dev_dependency(install):
-                    root_direct_dev_deps.append(install.name)
+                if constraint["arch"]:
+                    architectures = constraint["arch"]
                 else:
-                    root_direct_deps.append(install.name)
+                    architectures = ["amd64"]
 
-    metadata_kwargs = {}
-    if bazel_features.external_deps.extension_metadata_has_reproducible:
-        metadata_kwargs["reproducible"] = reproducible
+                for _ in range(len(ALL_SUPPORTED_ARCHES)):
+                    if len(architectures) == 0:
+                        break
+                    arch = architectures.pop()
+                    resolved_count = 0
 
-    return module_ctx.extension_metadata(
-        root_module_direct_deps = root_direct_deps,
-        root_module_direct_dev_deps = root_direct_dev_deps,
-        **metadata_kwargs
-    )
+                    module_ctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
+                    (package, dependencies, unmet_dependencies) = resolver.resolve_all(
+                        name = constraint["name"],
+                        version = constraint["version"],
+                        arch = arch,
+                        include_transitive = install.include_transitive,
+                    )
 
-_install_doc = """
+                    if not package:
+                        fail(
+                            "\n\nUnable to locate package `%s` for %s. It may only exist for specific set of architectures. \n" % (dep_constraint, arch) +
+                            "   1 - Ensure that the package is available for the specified architecture. \n" +
+                            "   2 - Ensure that the specified version of the package is available for the specified architecture. \n" +
+                            "   3 - Ensure that an apt.source_list added for the specified architecture.",
+                        )
+
+                    if len(unmet_dependencies):
+                        # buildifier: disable=print
+                        util.warning(module_ctx, "Following dependencies could not be resolved for %s: %s" % (constraint["name"], ",".join([up[0] for up in unmet_dependencies])))
+
+                    lockf.add_package(package)
+
+                    resolved_count += len(dependencies) + 1
+
+                    for dep in dependencies:
+                        lockf.add_package(dep)
+                        lockf.add_package_dependency(package, dep)
+
+                    # Add it to dependency set
+                    arch_set = dependency_set["sets"].setdefault(arch, {})
+                    arch_set[lockfile.short_package_key(package)] = package["Version"]
+
+                    # For cases where architecture for the package is not specified we need
+                    # to first find out which source contains the package. and in order to do
+                    # that we first need to resolve the package for amd64 architecture.
+                    # Once the repository is found, then resolve the package for all the
+                    # architectures the repository supports.
+                    if not constraint["arch"] and arch == "amd64":
+                        source = sources[package["Dist"]]
+                        architectures = [a for a in source["architectures"] if a != "amd64"]
+
+                module_ctx.report_progress("Resolved %d packages for %s" % (resolved_count, arch))
+
+        # Generate a hub repo for every dependency set
+        lock_content = lockf.as_json()
+        for depset_name in dependency_sets.keys():
+            translate_dependency_set(
+                name = depset_name,
+                depset_name = depset_name,
+                lock_content = lock_content,
+            )
+
+        # Generate a repo per package which will be aliased by hub repo.
+        for (package_key, package) in lockf.packages().items():
+            deb_import(
+                name = util.sanitize(package_key),
+                urls = [
+                    uri + "/" + package["filename"]
+                    for uri in sources[package["suite"]]["uris"]
+                ],
+                sha256 = package["sha256"],
+                mergedusr = False,
+                depends_on = ["@" + util.sanitize(dep_key) for dep_key in package["depends_on"]],
+            )
+
+        lock_tmp = module_ctx.path("apt.lock.json")
+        lockf.write(lock_tmp)
+        lockf_wksp = module_ctx.path(Label("@//:apt.lock.json"))
+        module_ctx.execute(
+            ["mv", lock_tmp, lockf_wksp],
+        )
+
+_doc = """
 Module extension to create Debian repositories.
 
 Create Debian repositories with packages "installed" in them and available
@@ -83,33 +160,33 @@ Here's an example how to create a Debian repo:
 
 ```starlark
 apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
-apt.install(
-    name = "bullseye",
-    lock = "//examples/apt:bullseye.lock.json",
-    manifest = "//examples/apt:bullseye.yaml",
+apt.sources_list(
+    types = ["deb"],
+    uris = [
+        "https://snapshot.ubuntu.com/ubuntu/20240301T030400Z",
+        "mirror+https://snapshot.ubuntu.com/ubuntu/20240301T030400Z"
+    ],
+    suites = ["noble", "noble-security", "noble-updates"],
+    components = ["main"],
+    architectures = ["all"]
 )
-use_repo(apt, "bullseye")
+apt.install(
+    # dependency set isolates these installs into their own scope.
+    dependency_set = "noble",
+    target_release = "noble",
+    packages = [
+        "ncurses-base",
+        "libncurses6",
+        "tzdata",
+        "coreutils:arm64",
+        "libstdc++6:i386"
+    ]
+)
 ```
 
-Note that, for the initial setup (or if we want to run without a lock) the
-lockfile attribute can be omitted. All you need is a YAML
-[manifest](/examples/debian_snapshot/bullseye.yaml):
-```yaml
-version: 1
 
-sources:
-  - channel: bullseye main
-    url: https://snapshot-cloudflare.debian.org/archive/debian/20240210T223313Z
-
-archs:
-  - amd64
-
-packages:
-  - perl
-```
-
-`apt.install` will parse the manifest and will fetch and install the packages
-for the given architectures in the Bazel repo `@<NAME>`.
+`apt.install` will install generate a package repository for each package and architecture
+combination in the form of `@<TARGET_RELEASE>_<PKG_NAME>_<PKG_ARCH>`.
 
 Each `<PACKAGE>/<ARCH>` has two targets that match the usual structure of a
 Debian package: `data` and `control`.
@@ -159,46 +236,36 @@ For more infomation, please check https://snapshot.debian.org and/or
 https://snapshot.ubuntu.com.
 """
 
+sources_list = tag_class(
+    attrs = {
+        "sources": attr.string_list(
+            # mandatory = True,
+        ),
+        "types": attr.string_list(),
+        "uris": attr.string_list(),
+        "suites": attr.string_list(),
+        "components": attr.string_list(),
+        "architectures": attr.string_list(),
+    },
+)
+
 install = tag_class(
     attrs = {
-        "name": attr.string(
-            doc = "Name of the generated repository",
+        "packages": attr.string_list(
             mandatory = True,
+            allow_empty = False,
         ),
-        "manifest": attr.label(
-            doc = "The file used to generate the lock file",
-            mandatory = True,
-        ),
-        "lock": attr.label(
-            doc = "The lock file to use for the index.",
-        ),
-        "nolock": attr.bool(
-            doc = "If you explicitly want to run without a lock, set it " +
-                  "to `True` to avoid the DEBUG messages.",
-            default = False,
-        ),
-        "package_template": attr.label(
-            doc = "(EXPERIMENTAL!) a template file for generated BUILD " +
-                  "files.",
-        ),
-        "resolve_transitive": attr.bool(
-            doc = "Whether dependencies of dependencies should be " +
-                  "resolved and added to the lockfile.",
-            default = True,
-        ),
-        "mergedusr": attr.bool(
-            doc = "Whether packges should be normalized following mergedusr conventions.\n" +
-                  "Turning this on might fix the following error thrown by docker for ambigious paths: `duplicate of paths are supported.` \n" +
-                  "For more context please see https://salsa.debian.org/md/usrmerge/-/raw/master/debian/README.Debian?ref_type=heads",
-            default = False,
-        ),
+        "dependency_set": attr.string(),
+        "target_release": attr.string(mandatory = True),
+        "include_transitive": attr.bool(default = True),
     },
-    doc = _install_doc,
 )
 
 apt = module_extension(
+    doc = _doc,
     implementation = _distroless_extension,
     tag_classes = {
         "install": install,
+        "sources_list": sources_list,
     },
 )
