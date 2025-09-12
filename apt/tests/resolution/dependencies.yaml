@@ -1,0 +1,15 @@
+version: 1
+sources:
+  - channel: jammy main
+    url: https://snapshot.ubuntu.com/ubuntu/20250302T030400Z
+  - channel: jammy universe
+    url: https://snapshot.ubuntu.com/ubuntu/20250302T030400Z
+  - channel: jammy-security main
+    url: https://snapshot.ubuntu.com/ubuntu/20250302T030400Z
+  - channel: jammy-updates main
+    url: https://snapshot.ubuntu.com/ubuntu/20250302T030400Z
+archs:
+  - "arm64"
+packages:
+  - "gcc"
+  - "gcc-aarch64-linux-gnu"

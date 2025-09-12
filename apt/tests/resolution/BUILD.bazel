@@ -62,6 +62,21 @@ assert_contains(
     expected = "73",
 )
 
+jq(
+    name = "unique_dependencies",
+    srcs = [
+        "@unique_dependencies_resolve//:lockfile",
+    ],
+    args = ["-rj"],
+    filter = '.packages | map(select(.name == "gcc")) | .[0].dependencies | group_by(.) | map(select(length>1) | .[0]) | length',
+)
+
+assert_contains(
+    name = "test_unique_dependencies",
+    actual = ":unique_dependencies",
+    expected = "0",
+)
+
 build_test(
     name = "build_clang",
     target_compatible_with = [
