@@ -81,6 +81,7 @@ _ARCHITECTURES = {architectures}
        "@platforms//os:" + os,
        "@platforms//cpu:" + _ARCHITECTURE_MAP[arch],
     ],
+    visibility = ["//:__subpackages__"],
   )
   for os in ["linux"]
   for arch in _ARCHITECTURES
