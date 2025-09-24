@@ -17,6 +17,8 @@ def _resolve_package(state, name, version, arch):
         )
     ]
 
+    warning = None
+
     if len(candidates) == 1:
         return candidates[0]
 
@@ -36,11 +38,10 @@ def _resolve_package(state, name, version, arch):
 
         # Otherwise, we can't disambiguate the virtual package providers so
         # choose none and warn.
-        # buildifier: disable=print
-        print("\nMultiple candidates for virtual package '{}': {}".format(
+        warning = "Multiple candidates for virtual package '{}': {}".format(
             name,
-            [package["Package"] for package in candidates],
-        ))
+            ", ".join([package["Package"] for package in candidates]),
+        )
 
     # Get available versions of the package
     versions_by_arch = state.repository.package_versions(name = name, arch = arch)
@@ -68,7 +69,7 @@ def _resolve_package(state, name, version, arch):
     if not package:
         package = state.repository.package(name = name, version = selected_version, arch = "all")
 
-    return package
+    return (package, warning)
 
 _ITERATION_MAX_ = 2147483646
 
@@ -85,6 +86,8 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
     dependency_group = []
     stack = [(name, version, -1)]
 
+    warnings = []
+
     for i in range(0, _ITERATION_MAX_ + 1):
         if not len(stack):
             break
@@ -98,7 +101,9 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
             continue
 
         # TODO: only resolve in specified suites
-        package = _resolve_package(state, name, version, arch)
+        (package, warning) = _resolve_package(state, name, version, arch)
+        if warning:
+            warnings.append(warning)
 
         # If this package is not found and is part of a dependency group, then just skip it.
         if not package and dependency_group_idx > -1:
@@ -158,7 +163,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         if not met:
             unmet_dependencies.append((dep, None))
 
-    return (root_package, dependencies, unmet_dependencies)
+    return (root_package, dependencies, unmet_dependencies, warnings)
 
 def _create_resolution(repository):
     state = struct(repository = repository)

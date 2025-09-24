@@ -27,17 +27,25 @@ def _parse_source(src):
         components = components,
     )
 
-def _distroless_extension(module_ctx):
+def _distroless_extension(mctx):
     root_direct_deps = []
     root_direct_dev_deps = []
     reproducible = False
 
-    for mod in module_ctx.modules:
-        deb_repo = deb_repository.new(module_ctx)
+    for mod in mctx.modules:
+        lockf = lockfile.empty(mctx)
+
+        # if mod.is_root:
+
+        if len(mod.tags.lock):
+            lock = mod.tags.lock[0]
+            lockf = lockfile.from_json(mctx, mctx.read(lock.into))
+
+        deb_repo = deb_repository.new(mctx, lockf.facts())
         resolver = dependency_resolver.new(deb_repo)
-        lockf = lockfile.empty(module_ctx)
 
         for sl in mod.tags.sources_list:
+            continue
             uris = [uri.removeprefix("mirror+") for uri in sl.uris]
             architectures = sl.architectures
 
@@ -58,6 +66,7 @@ def _distroless_extension(module_ctx):
         sources = lockf.sources()
         dependency_sets = lockf.dependency_sets()
         for install in mod.tags.install:
+            continue
             dependency_set = dependency_sets.setdefault(install.dependency_set, {
                 "sets": {},
             })
@@ -77,8 +86,8 @@ def _distroless_extension(module_ctx):
                     arch = architectures.pop()
                     resolved_count = 0
 
-                    module_ctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
-                    (package, dependencies, unmet_dependencies) = resolver.resolve_all(
+                    mctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
+                    (package, dependencies, unmet_dependencies, warnings) = resolver.resolve_all(
                         name = constraint["name"],
                         version = constraint["version"],
                         arch = arch,
@@ -93,9 +102,11 @@ def _distroless_extension(module_ctx):
                             "   3 - Ensure that an apt.source_list added for the specified architecture.",
                         )
 
+                    for warning in warnings:
+                        util.warning(mctx, warning)
+
                     if len(unmet_dependencies):
-                        # buildifier: disable=print
-                        util.warning(module_ctx, "Following dependencies could not be resolved for %s: %s" % (constraint["name"], ",".join([up[0] for up in unmet_dependencies])))
+                        util.warning(mctx, "Following dependencies could not be resolved for %s: %s" % (constraint["name"], ",".join([up[0] for up in unmet_dependencies])))
 
                     lockf.add_package(package)
 
@@ -110,7 +121,7 @@ def _distroless_extension(module_ctx):
                     arch_set[lockfile.short_package_key(package)] = package["Version"]
 
                     # For cases where architecture for the package is not specified we need
-                    # to first find out which source contains the package. and in order to do
+                    # to first find out which source contains the package. in order to do
                     # that we first need to resolve the package for amd64 architecture.
                     # Once the repository is found, then resolve the package for all the
                     # architectures the repository supports.
@@ -118,7 +129,7 @@ def _distroless_extension(module_ctx):
                         source = sources[package["Dist"]]
                         architectures = [a for a in source["architectures"] if a != "amd64"]
 
-                module_ctx.report_progress("Resolved %d packages for %s" % (resolved_count, arch))
+                mctx.report_progress("Resolved %d packages for %s" % (resolved_count, arch))
 
         # Generate a hub repo for every dependency set
         lock_content = lockf.as_json()
@@ -131,23 +142,33 @@ def _distroless_extension(module_ctx):
 
         # Generate a repo per package which will be aliased by hub repo.
         for (package_key, package) in lockf.packages().items():
+            # dependent_packages = None
+            # if package["name"].endswith("-dev")
+            #     packages = lockf.packages()
+            #     dependent_packages = json.encode([
+
+            #     ])
+
             deb_import(
                 name = util.sanitize(package_key),
+                target_name = util.sanitize(package_key),
                 urls = [
                     uri + "/" + package["filename"]
                     for uri in sources[package["suite"]]["uris"]
                 ],
                 sha256 = package["sha256"],
                 mergedusr = False,
-                depends_on = ["@" + util.sanitize(dep_key) for dep_key in package["depends_on"]],
+                depends_on = package["depends_on"],
+                package_name = package["name"],
             )
 
-        lock_tmp = module_ctx.path("apt.lock.json")
-        lockf.write(lock_tmp)
-        lockf_wksp = module_ctx.path(Label("@//:apt.lock.json"))
-        module_ctx.execute(
-            ["mv", lock_tmp, lockf_wksp],
-        )
+        for lock in mod.tags.lock:
+            lock_tmp = mctx.path("apt.lock.json")
+            lockf.write(lock_tmp)
+            lockf_wksp = mctx.path(lock.into)
+            mctx.execute(
+                ["cp", "-f", lock_tmp, lockf_wksp],
+            )
 
 _doc = """
 Module extension to create Debian repositories.
@@ -261,11 +282,20 @@ install = tag_class(
     },
 )
 
+lock = tag_class(
+    attrs = {
+        "into": attr.label(
+            mandatory = True,
+        ),
+    },
+)
+
 apt = module_extension(
     doc = _doc,
     implementation = _distroless_extension,
     tag_classes = {
         "install": install,
         "sources_list": sources_list,
+        "lock": lock,
     },
 )
