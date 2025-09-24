@@ -8,6 +8,13 @@ def _make_package_key(suite, name, version, arch):
         version,
     )
 
+def _parse_package_key(key):
+    rest = key[1:]
+    (suite, rest) = rest.split("/", 1)
+    (name, rest) = rest.split(":", 1)
+    (arch, version) = rest.split("=", 1)
+    return (suite, name, arch, version)
+
 def _short_package_key(package):
     return "/%s/%s:%s" % (
         package["Dist"],
@@ -53,7 +60,7 @@ def _add_source(lock, suite, types, uris, components, architectures):
         "architectures": architectures,
     }
 
-def _create(rctx, lock):
+def _create(mctx, lock):
     return struct(
         has_package = lambda *args, **kwargs: _has_package(lock, *args, **kwargs),
         add_source = lambda *args, **kwargs: _add_source(lock, *args, **kwargs),
@@ -62,25 +69,27 @@ def _create(rctx, lock):
         packages = lambda: lock.packages,
         sources = lambda: lock.sources,
         dependency_sets = lambda: lock.dependency_sets,
-        write = lambda out: rctx.file(out, _encode_compact(lock)),
+        facts = lambda: lock.facts,
+        write = lambda out: mctx.file(out, _encode_compact(lock)),
         as_json = lambda: _encode_compact(lock),
     )
 
-def _empty(rctx):
+def _empty(mctx):
     lock = struct(
         version = 2,
         dependency_sets = dict(),
         packages = dict(),
         sources = dict(),
+        facts = dict(),
     )
-    return _create(rctx, lock)
+    return _create(mctx, lock)
 
 def _encode_compact(lock):
     return json.encode_indent(lock)
 
-def _from_json(rctx, content):
+def _from_json(mctx, content):
     if not content:
-        return _empty(rctx)
+        return _empty(mctx)
 
     lock = json.decode(content)
     if lock["version"] != 2:
@@ -91,12 +100,14 @@ def _from_json(rctx, content):
         dependency_sets = lock["dependency_sets"] if "dependency_sets" in lock else dict(),
         packages = lock["packages"] if "packages" in lock else dict(),
         sources = lock["sources"] if "sources" in lock else dict(),
+        facts = lock["facts"] if "facts" in lock else dict(),
     )
-    return _create(rctx, lock)
+    return _create(mctx, lock)
 
 lockfile = struct(
     empty = _empty,
     from_json = _from_json,
     package_key = _package_key,
     short_package_key = _short_package_key,
+    parse_package_key = _parse_package_key,
 )
