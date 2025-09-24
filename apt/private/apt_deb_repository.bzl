@@ -12,7 +12,7 @@ def _get_auth(ctx, urls):
         netrc = read_user_netrc(ctx)
     return use_netrc(netrc, urls, {})
 
-def _fetch_package_index(rctx, urls, dist, comp, arch, integrity):
+def _fetch_package_index(mctx, urls, dist, comp, arch, integrity):
     target_triple = "{dist}/{comp}/{arch}".format(dist = dist, comp = comp, arch = arch)
 
     # See https://linux.die.net/man/1/xz , https://linux.die.net/man/1/gzip , and https://linux.die.net/man/1/bzip2
@@ -30,7 +30,7 @@ def _fetch_package_index(rctx, urls, dist, comp, arch, integrity):
     failed_attempts = []
 
     url = None
-    base_auth = _get_auth(rctx, urls)
+    base_auth = _get_auth(mctx, urls)
     for url in urls:
         download = None
         for (ext, cmd) in supported_extensions:
@@ -39,7 +39,7 @@ def _fetch_package_index(rctx, urls, dist, comp, arch, integrity):
             auth = {}
             if url in base_auth:
                 auth = {dist_url: base_auth[url]}
-            download = rctx.download(
+            download = mctx.download(
                 url = dist_url,
                 output = output,
                 integrity = integrity,
@@ -163,6 +163,7 @@ def _package(state, name, version, arch):
 
 def _fetch_and_parse_sources(state):
     mctx = state.mctx
+    facts = state.facts
     for source in state.sources:
         (urls, dist, components, architectures) = source
 
@@ -175,19 +176,25 @@ def _fetch_and_parse_sources(state):
                 # on misconfigured HTTP servers)
                 urls = [url.rstrip("/") for url in urls]
 
+                fact_key = dist + "/" + comp + "/" + arch
+                fact_value = facts.get(fact_key, "")
+
                 # TODO: make parallel
                 mctx.report_progress("Fetching package index: {}/{} for {}".format(dist, comp, arch))
-                (output, _, _) = _fetch_package_index(mctx, urls, dist, comp, arch, "")
+                (output, url, integrity) = _fetch_package_index(mctx, urls, dist, comp, arch, fact_value)
+
+                facts[fact_key] = integrity
 
                 mctx.report_progress("Parsing package index: {}/{} for {}".format(dist, comp, arch))
                 _parse_repository(state, mctx.read(output), urls, dist)
 
-def _create(mctx):
+def _create(mctx, facts):
     state = struct(
         mctx = mctx,
         sources = list(),
         packages = dict(),
         virtual_packages = dict(),
+        facts = facts,
     )
 
     return struct(
