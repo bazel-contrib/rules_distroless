@@ -104,7 +104,7 @@ check the following docs:
 
 # Adopters
 
-- [Google's `distroless` container images]
+- [Google's `distroless` container images](https://github.com/GoogleContainerTools/distroless)
 - [Arize AI](https://www.arize.com)
 
 > [!TIP]
