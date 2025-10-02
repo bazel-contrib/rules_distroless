@@ -20,7 +20,7 @@ def _resolve_package(state, name, version, arch):
     warning = None
 
     if len(candidates) == 1:
-        return candidates[0]
+        return (candidates[0], warning)
 
     if len(candidates) > 1:
         for package in candidates:
@@ -34,7 +34,7 @@ def _resolve_package(state, name, version, arch):
             #
             # In the case of required packages, these defaults are not specified.
             if "Priority" in package and package["Priority"] == "required":
-                return package
+                return (package, warning)
 
         # Otherwise, we can't disambiguate the virtual package providers so
         # choose none and warn.

@@ -104,10 +104,22 @@ def _from_json(mctx, content):
     )
     return _create(mctx, lock)
 
+def _merge(mctx, locks):
+    mlock = _empty(mctx)
+    packages = mlock.packages()
+    facts = mlock.facts()
+    for lock in locks:
+        for (key, pkg) in lock.packages().items():
+            packages[key] = pkg
+        for (key, fact) in lock.facts().items():
+            facts[key] = fact
+    return mlock
+
 lockfile = struct(
     empty = _empty,
     from_json = _from_json,
     package_key = _package_key,
     short_package_key = _short_package_key,
     parse_package_key = _parse_package_key,
+    merge = _merge,
 )
