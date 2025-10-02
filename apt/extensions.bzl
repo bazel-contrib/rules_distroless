@@ -32,41 +32,47 @@ def _distroless_extension(mctx):
     root_direct_dev_deps = []
     reproducible = False
 
+    # As in mach 9 :)
+    glock = lockfile.merge(mctx, [
+        lockfile.from_json(mctx, mctx.read(lock.into))
+        for mod in mctx.modules
+        for lock in mod.tags.lock
+    ])
+
+    repo = deb_repository.new(mctx, glock.facts())
+    resolver = dependency_resolver.new(repo)
+
     for mod in mctx.modules:
-        lockf = lockfile.empty(mctx)
-
-        # if mod.is_root:
-
-        if len(mod.tags.lock):
-            lock = mod.tags.lock[0]
-            lockf = lockfile.from_json(mctx, mctx.read(lock.into))
-
-        deb_repo = deb_repository.new(mctx, lockf.facts())
-        resolver = dependency_resolver.new(deb_repo)
-
+        # TODO: also enfore that every module explicitly lists their sources_list
+        # otherwise they'll break if the sources_list that the module depends on
+        # magically disappears.
         for sl in mod.tags.sources_list:
-            continue
             uris = [uri.removeprefix("mirror+") for uri in sl.uris]
             architectures = sl.architectures
 
             for suite in sl.suites:
-                lockf.add_source(
+                glock.add_source(
                     suite,
                     uris = uris,
                     types = sl.types,
                     components = sl.components,
                     architectures = architectures,
                 )
-                deb_repo.add_source(
+
+                repo.add_source(
                     (uris, suite, sl.components, architectures),
                 )
 
-        deb_repo.fetch_and_parse()
+    # Fetch all sources_list and parse them.
+    # Unfortunately repository rules have no concept of threads
+    # so parsing has to happen sequentially
+    repo.fetch_and_parse()
 
-        sources = lockf.sources()
-        dependency_sets = lockf.dependency_sets()
+    sources = glock.sources()
+    dependency_sets = glock.dependency_sets()
+
+    for mod in mctx.modules:
         for install in mod.tags.install:
-            continue
             dependency_set = dependency_sets.setdefault(install.dependency_set, {
                 "sets": {},
             })
@@ -106,15 +112,23 @@ def _distroless_extension(mctx):
                         util.warning(mctx, warning)
 
                     if len(unmet_dependencies):
-                        util.warning(mctx, "Following dependencies could not be resolved for %s: %s" % (constraint["name"], ",".join([up[0] for up in unmet_dependencies])))
+                        util.warning(
+                            mctx,
+                            "Following dependencies could not be resolved for %s: %s" % (constraint["name"], ",".join([up[0] for up in unmet_dependencies])),
+                        )
 
-                    lockf.add_package(package)
+                    # TODO:
+                    # Ensure following statements are true.
+                    #  1- Package was resolved from a source that module listed explicitly.
+                    #  2- Package resolution was skipped because some other module asked for this package.
+                    #  3- 1) is enforced even if 2) is the case.
+                    glock.add_package(package)
 
                     resolved_count += len(dependencies) + 1
 
                     for dep in dependencies:
-                        lockf.add_package(dep)
-                        lockf.add_package_dependency(package, dep)
+                        glock.add_package(dep)
+                        glock.add_package_dependency(package, dep)
 
                     # Add it to dependency set
                     arch_set = dependency_set["sets"].setdefault(arch, {})
@@ -131,40 +145,40 @@ def _distroless_extension(mctx):
 
                 mctx.report_progress("Resolved %d packages for %s" % (resolved_count, arch))
 
-        # Generate a hub repo for every dependency set
-        lock_content = lockf.as_json()
-        for depset_name in dependency_sets.keys():
-            translate_dependency_set(
-                name = depset_name,
-                depset_name = depset_name,
-                lock_content = lock_content,
-            )
+    # Generate a hub repo for every dependency set
+    lock_content = glock.as_json()
+    for depset_name in dependency_sets.keys():
+        translate_dependency_set(
+            name = depset_name,
+            depset_name = depset_name,
+            lock_content = lock_content,
+        )
 
-        # Generate a repo per package which will be aliased by hub repo.
-        for (package_key, package) in lockf.packages().items():
-            # dependent_packages = None
-            # if package["name"].endswith("-dev")
-            #     packages = lockf.packages()
-            #     dependent_packages = json.encode([
+    # Generate a repo per package which will be aliased by hub repo.
+    for (package_key, package) in glock.packages().items():
+        deb_import(
+            name = util.sanitize(package_key),
+            target_name = util.sanitize(package_key),
+            urls = [
+                uri + "/" + package["filename"]
+                for uri in sources[package["suite"]]["uris"]
+            ],
+            sha256 = package["sha256"],
+            mergedusr = False,
+            depends_on = package["depends_on"],
+            package_name = package["name"],
+        )
 
-            #     ])
+    for mod in mctx.modules:
+        if not mod.is_root:
+            continue
 
-            deb_import(
-                name = util.sanitize(package_key),
-                target_name = util.sanitize(package_key),
-                urls = [
-                    uri + "/" + package["filename"]
-                    for uri in sources[package["suite"]]["uris"]
-                ],
-                sha256 = package["sha256"],
-                mergedusr = False,
-                depends_on = package["depends_on"],
-                package_name = package["name"],
-            )
-
-        for lock in mod.tags.lock:
+        if len(mod.tags.lock) > 1:
+            fail("There can only be one apt.lock per module.")
+        elif len(mod.tags.lock) == 1:
+            lock = mod.tags.lock[0]
             lock_tmp = mctx.path("apt.lock.json")
-            lockf.write(lock_tmp)
+            glock.write(lock_tmp)
             lockf_wksp = mctx.path(lock.into)
             mctx.execute(
                 ["cp", "-f", lock_tmp, lockf_wksp],
