@@ -164,41 +164,58 @@ def _package(state, name, version, arch):
 def _fetch_and_parse_sources(state):
     mctx = state.mctx
     facts = state.facts
-    for source in state.sources:
-        (urls, dist, components, architectures) = source
 
-        for arch in architectures:
-            for comp in components:
-                # We assume that `url` does not contain a trailing forward slash when passing to
-                # functions below. If one is present, remove it. Some HTTP servers do not handle
-                # redirects properly when a path contains "//"
-                # (ie. https://mymirror.com/ubuntu//dists/noble/stable/... may return a 404
-                # on misconfigured HTTP servers)
-                urls = [url.rstrip("/") for url in urls]
+    # TODO: make parallel
+    for source in state.sources.values():
+        (urls, dist, component, architecture) = source
 
-                fact_key = dist + "/" + comp + "/" + arch
-                fact_value = facts.get(fact_key, "")
+        # We assume that `url` does not contain a trailing forward slash when passing to
+        # functions below. If one is present, remove it. Some HTTP servers do not handle
+        # redirects properly when a path contains "//"
+        # (ie. https://mymirror.com/ubuntu//dists/noble/stable/... may return a 404
+        # on misconfigured HTTP servers)
+        urls = [url.rstrip("/") for url in urls]
 
-                # TODO: make parallel
-                mctx.report_progress("Fetching package index: {}/{} for {}".format(dist, comp, arch))
-                (output, url, integrity) = _fetch_package_index(mctx, urls, dist, comp, arch, fact_value)
+        fact_key = dist + "/" + component + "/" + architecture
+        fact_value = facts.get(fact_key, "")
 
-                facts[fact_key] = integrity
+        mctx.report_progress("Fetching package index: {}/{} for {}".format(dist, component, architecture))
+        (output, url, integrity) = _fetch_package_index(mctx, urls, dist, component, architecture, fact_value)
 
-                mctx.report_progress("Parsing package index: {}/{} for {}".format(dist, comp, arch))
-                _parse_repository(state, mctx.read(output), urls, dist)
+        facts[fact_key] = integrity
+
+        mctx.report_progress("Parsing package index: {}/{} for {}".format(dist, component, architecture))
+        _parse_repository(state, mctx.read(output), urls, dist)
+
+def _add_source_if_not_present(state, source):
+    (urls, dist, components, architectures) = source
+
+    for arch in architectures:
+        for comp in components:
+            keys = [
+                "%".join((url, dist, comp, arch))
+                for url in urls
+            ]
+            found = any([
+                key in state.sources
+                for key in keys
+            ])
+            if found:
+                continue
+            for key in keys:
+                state.sources[key] = (urls, dist, comp, arch)
 
 def _create(mctx, facts):
     state = struct(
         mctx = mctx,
-        sources = list(),
+        sources = dict(),
         packages = dict(),
         virtual_packages = dict(),
         facts = facts,
     )
 
     return struct(
-        add_source = lambda source: state.sources.append(source),
+        add_source = lambda source: _add_source_if_not_present(state, source),
         fetch_and_parse = lambda: _fetch_and_parse_sources(state),
         package_versions = lambda **kwargs: _package_versions(state, **kwargs),
         virtual_packages = lambda **kwargs: _virtual_packages(state, **kwargs),
