@@ -7,8 +7,9 @@ module(
 
 bazel_dep(name = "platforms", version = "0.0.10")
 bazel_dep(name = "bazel_features", version = "1.20.0")
+bazel_dep(name = "bazel_lib", version = "3.0.0-rc.0")
 bazel_dep(name = "bazel_skylib", version = "1.5.0")
-bazel_dep(name = "aspect_bazel_lib", version = "2.14.0")
+bazel_dep(name = "aspect_bazel_lib", version = "2.14.0")  # TODO(alexeagle): remove
 bazel_dep(name = "rules_java", version = "8.8.0")
 bazel_dep(name = "rules_shell", version = "0.4.1")
 
