@@ -37,7 +37,7 @@ use_repo(yq_toolchains, "yq_windows_amd64")
 bazel_dep(name = "gazelle", version = "0.34.0", dev_dependency = True, repo_name = "bazel_gazelle")
 bazel_dep(name = "bazel_skylib_gazelle_plugin", version = "1.5.0", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "8.0.1", dev_dependency = True)
-bazel_dep(name = "jq.bzl", version = "0.3.0", dev_dependency = True)
+bazel_dep(name = "jq.bzl", version = "0.4.0", dev_dependency = True)
 bazel_dep(name = "rules_oci", version = "2.0.0", dev_dependency = True)
 bazel_dep(name = "container_structure_test", version = "1.16.0", dev_dependency = True)
 
