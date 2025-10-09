@@ -3,7 +3,7 @@ workspaces:
   - .
   - e2e/smoke
 tasks:
-  - gazelle:
   - test:
+  - gazelle:
 notifications:
   github: {}
