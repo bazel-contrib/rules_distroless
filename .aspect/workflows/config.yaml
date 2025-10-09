@@ -4,5 +4,6 @@ workspaces:
   - e2e/smoke
 tasks:
   - test:
+      queue: aspect-large
 notifications:
   github: {}
