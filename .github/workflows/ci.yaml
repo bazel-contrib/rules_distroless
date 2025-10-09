@@ -16,17 +16,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    uses: bazel-contrib/.github/.github/workflows/bazel.yaml@d8163053334bda95e01b01348d218441132276b2
-    with:
-      folders: |
-        [
-          ".",
-          "e2e/smoke"
-        ]
-      exclude: |
-        [
-          {"folder": ".", "bzlmodEnabled": false},
-          {"folder": "e2e/smoke", "bzlmodEnabled": false},
-          {"os": "windows-latest"},
-        ]
+  # Tests are run on Linux using Aspect Workflows on Buildkite.
+  # Just keep a minimal macos footprint to avoid obvious regressions.
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.15.0
+      - run: bazel test //...
