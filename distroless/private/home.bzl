@@ -1,6 +1,6 @@
 "home"
 
-load("@aspect_bazel_lib//lib:tar.bzl", "tar")
+load("@tar.bzl//tar:tar.bzl", "tar")
 load(":tar.bzl", "tar_lib")
 load(":util.bzl", "util")
 

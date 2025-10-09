@@ -1,7 +1,7 @@
 "mtree helpers"
 
-load("@aspect_bazel_lib//lib:tar.bzl", tar = "tar_lib")
 load("@bazel_skylib//lib:sets.bzl", "sets")
+load("@tar.bzl//tar:tar.bzl", tar = "tar_lib")
 
 DEFAULT_GID = "0"
 DEFAULT_UID = "0"
