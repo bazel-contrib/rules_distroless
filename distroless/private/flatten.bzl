@@ -13,6 +13,7 @@ def _flatten_impl(ctx):
     args = ctx.actions.args()
     args.add(bsdtar.tarinfo.binary)
     args.add(str(ctx.attr.deduplicate))
+    args.add(ctx.executable._gawk.path)
     args.add_all(tar_lib.DEFAULT_ARGS)
     args.add("--create")
     tar_lib.common.add_compression_args(ctx.attr.compress, args)
@@ -23,7 +24,7 @@ def _flatten_impl(ctx):
         executable = ctx.executable._flatten_sh,
         inputs = ctx.files.tars,
         outputs = [output],
-        tools = bsdtar.default.files,
+        tools = [bsdtar.default.files, ctx.executable._gawk],
         arguments = [args],
         mnemonic = "Flatten",
         progress_message = "Flattening %{label}",
@@ -47,14 +48,18 @@ EXPERIMENTAL: We may change or remove it without a notice.
 
 Remove duplicate entries from the archives after flattening.
 Deduplication is performed only for directories.
-
-This requires `awk` to be available in the PATH.
         """, default = False),
         "compress": attr.string(
             doc = "Compress the archive file with a supported algorithm.",
             values = tar_lib.common.accepted_compression_types,
         ),
         "_flatten_sh": attr.label(default = "//distroless/private:flatten.sh", executable = True, cfg = "exec", allow_single_file = True),
+        "_gawk": attr.label(
+            allow_single_file = True,
+            executable = True,
+            cfg = "exec",
+            default = "@gawk//:gawk",
+        ),
     },
     implementation = _flatten_impl,
     toolchains = [tar_lib.TOOLCHAIN_TYPE],
