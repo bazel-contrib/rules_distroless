@@ -77,16 +77,18 @@ _ITERATION_MAX_ = 2147483646
 # certain conditions and package dependency groups.
 # TODO: Try to simplify it in the future.
 def _resolve_all(state, name, version, arch, include_transitive = True):
-    root_package = None
     unmet_dependencies = []
+    root_package = None
     dependencies = []
+    direct_dependencies = {}
 
     # state variables
     already_recursed = {}
     dependency_group = []
-    stack = [(name, version, -1)]
-
+    stack = [(name, version, -1, None)]
     warnings = []
+
+    path = []
 
     for i in range(0, _ITERATION_MAX_ + 1):
         if not len(stack):
@@ -94,17 +96,23 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         if i == _ITERATION_MAX_:
             fail("resolve_all exhausted")
 
-        (name, version, dependency_group_idx) = stack.pop()
+        (name, version, dependency_group_idx, requested_by) = stack.pop()
 
         # If this iteration is part of a dependency group, and the dependency group is already met, then skip this iteration.
         if dependency_group_idx > -1 and dependency_group[dependency_group_idx][0]:
             continue
+
+        path.append(name)
 
         # TODO: only resolve in specified suites
         (package, warning) = _resolve_package(state, name, version, arch)
         if warning:
             warnings.append(warning)
 
+        if package and requested_by and package["Package"] != requested_by and package["Package"] not in already_recursed:
+            direct_dependencies.setdefault(requested_by, []).append(package)
+
+        # Unmet optional dependency encountered
         # If this package is not found and is part of a dependency group, then just skip it.
         if not package and dependency_group_idx > -1:
             continue
@@ -126,6 +134,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
 
         # If we encountered package before in the transitive closure, skip it
         if key in already_recursed:
+            # fail(" -> ".join(path))
             continue
 
         # Do not add dependency if it's a root package to avoid circular dependency.
@@ -154,16 +163,16 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
                 # stack it means we need to push in reverse order.
                 for gdep in reversed(dep):
                     # TODO: arch
-                    stack.append((gdep["name"], gdep["version"], new_dependency_group_idx))
+                    stack.append((gdep["name"], gdep["version"], new_dependency_group_idx, package["Package"]))
             else:
                 # TODO: arch
-                stack.append((dep["name"], dep["version"], -1))
+                stack.append((dep["name"], dep["version"], -1, package["Package"]))
 
     for (met, dep) in dependency_group:
         if not met:
             unmet_dependencies.append((dep, None))
 
-    return (root_package, dependencies, unmet_dependencies, warnings)
+    return (root_package, dependencies, unmet_dependencies, direct_dependencies, warnings)
 
 def _create_resolution(repository):
     state = struct(repository = repository)

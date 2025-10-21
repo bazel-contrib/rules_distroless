@@ -1,7 +1,7 @@
 "deb_import"
 
 load(":lockfile.bzl", "lockfile")
-load(":pkgconfig.bzl", "parse_pc")
+load(":pkgconfig.bzl", "parse_pc", "process_pcconfig")
 load(":util.bzl", "util")
 
 # BUILD.bazel template
@@ -11,6 +11,7 @@ load("@rules_distroless//apt/private:deb_cc_export.bzl", "deb_cc_export")
 load("@rules_distroless//apt/private:apt_cursed_symlink.bzl", "apt_cursed_symlink")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@bazel_skylib//rules/directory:directory.bzl", "directory")
 
 deb_postfix(
     name = "data",
@@ -35,8 +36,18 @@ filegroup(
 
 deb_cc_export(
     name = "cc_export",
-    src = glob(["data.tar*"])[0],
+    srcs = glob(["data.tar*"]),
+    symlinks = {symlinks},
+    symlink_outs = {symlink_outs},
+    self_symlink_outs = {self_symlink_outs},
+    self_symlink_output_indices = {self_symlink_output_indices},
     outs = {outs},
+    visibility = ["//visibility:public"]
+)
+
+directory(
+    name = "directory",
+    srcs = {symlink_outs} + {outs} + {self_symlink_outs},
     visibility = ["//visibility:public"]
 )
 
@@ -59,7 +70,19 @@ _CC_LIBRARY_TMPL = """
 cc_library(
     name = "{name}",
     hdrs = {hdrs},
-    strip_include_prefix = "usr/include",
+    additional_linker_inputs = {additional_linker_inputs},
+    strip_include_prefix = "{strip_include_prefix}",
+    visibility = ["//visibility:public"],
+)
+"""
+
+_CC_LIBRARY_LIBC_TMPL = """
+cc_library(
+    name = "{name}",
+    hdrs = {hdrs},
+    srcs = {srcs},
+    includes = {includes},
+    additional_compiler_inputs = {additional_compiler_inputs},
     visibility = ["//visibility:public"],
 )
 """
@@ -72,76 +95,132 @@ cc_library(
 )
 """
 
-_APT_CURSED_SYMLINK = """
-apt_cursed_symlink(
-    name = "{name}_cursed",
-    own_path = "{own_path}",
-    candidate_path = "{candidate_path}",
-    candidates = {candidates},
-    out="{out}"
-)
-"""
+def resolve_symlink(target_path, relative_symlink):
+    # Split paths into components
+    target_parts = target_path.split("/")
+    symlink_parts = relative_symlink.split("/")
 
-def _discover_contents(rctx, depends_on, target_name):
-    result = rctx.execute(["tar", "-tf", "data.tar.xz"])
+    # Remove the file name from target path to get the directory
+    target_dir_parts = target_parts[:-1]
+
+    # Process the relative symlink
+    result_parts = target_dir_parts[:]
+    for part in symlink_parts:
+        if part == "..":
+            # Move up one directory by removing the last component
+            if result_parts:
+                result_parts.pop()
+        elif part == "." or part == "":
+            # Ignore current directory or empty components
+            continue
+        else:
+            # Append the component to the path
+            result_parts.append(part)
+
+    # Join the parts back into a path
+    resolved_path = "/".join(result_parts)
+    return resolved_path
+
+def _discover_contents(rctx, depends_on, direct_depends_on, direct_depends_file_map, target_name):
+    result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
     contents_raw = result.stdout.splitlines()
     so_files = []
     a_files = []
     h_files = []
     hpp_files = []
+    hpp_files_woext = []
     pc_files = []
+    symlinks = {}
     deps = []
     excluded_files = []
 
-    for dep in depends_on:
-        (suite, name, arch, version) = lockfile.parse_package_key(dep)
-        if not name.endswith("-dev"):
-            # TODO:
-            # This is probably not safe.
-            # What if a package has a dependency (with a .so file in it)
-            # but its a not -dev package?
-            continue
-        deps.append(
-            "@%s//:%s" % (util.sanitize(dep), name.removesuffix("-dev")),
-        )
-
     for line in contents_raw:
-        # Skip everything in man pages and examples
-        if line.startswith("/usr/share"):
-            continue
-
         # Skip directories
         if line.endswith("/"):
             continue
 
-        if (line.endswith(".so") or line.find(".so.") > 5) and line.find("lib"):
+        line = line[line.find(" ./") + 3:]
+
+        # Skip everything in man pages and examples
+        if line.startswith("usr/share"):
+            continue
+
+        is_symlink_idx = line.find(" -> ")
+        if is_symlink_idx != -1:
+            symlink_target = line[is_symlink_idx + 4:]
+            line = line[:is_symlink_idx]
+            if line.endswith(".pc"):
+                continue
+            symlinks[line] = resolve_symlink(line, symlink_target).removeprefix("./")
+
+        if (line.endswith(".so") or line.find(".so.") != -1) and line.find("lib") != -1:
             so_files.append(line)
         elif line.endswith(".a") and line.find("lib"):
             a_files.append(line)
         elif line.endswith(".pc") and line.find("pkgconfig"):
             pc_files.append(line)
-        elif line.endswith(".h") and line.startswith("./usr/include"):
+        elif line.endswith(".h"):
             h_files.append(line)
-        elif line.endswith(".hpp") and line.startswith("./usr/include"):
+        elif line.endswith(".hpp"):
             hpp_files.append(line)
+        elif line.find("include/c++") != -1:
+            hpp_files_woext.append(line)
+
+    # Resolve symlinks:
+    resolved_symlinks = list([None] * len(symlinks))
+    symlink_targets = {
+        v: k
+        for (k, v) in symlinks.items()
+    }
+    osymlinks = symlinks
+    symlinks = {
+        k: None
+        for k in symlinks.keys()
+    }
+    solved_symlinks = 0
+    for dep in direct_depends_on or depends_on:
+        (suite, name, arch, version) = lockfile.parse_package_key(dep)
+        filemap = direct_depends_file_map.get(name, []) or []
+        for file in filemap:
+            if file in symlink_targets:
+                symlink_path = symlink_targets[file]
+                symlinks[symlink_path] = "@%s//:%s" % (util.sanitize(dep), file)
+                solved_symlinks += 1
+                if solved_symlinks == len(symlink_targets):
+                    break
+
+    outs = []
+
+    for out in so_files + h_files + hpp_files + a_files + hpp_files_woext:
+        if out not in symlinks:
+            outs.append(out)
+
+    self_symlinks = {}
+    for (i, file) in enumerate(outs):
+        if file in symlink_targets:
+            symlink_path = symlink_targets[file]
+            self_symlinks[symlink_path] = i
+            solved_symlinks += 1
+            if solved_symlinks == len(symlink_targets):
+                break
+
+    if solved_symlinks < len(symlink_targets):
+        util.warning(rctx, "some symlinks could not be solved for {}. \n{}".format(target_name, osymlinks))
 
     build_file_content = ""
 
     # TODO: handle non symlink pc files similar to how we
     # handle so symlinks
     non_symlink_pc_file = None
-    pc_files_all_symlink = False
 
     if len(pc_files):
         # TODO: use rctx.extract instead.
         r = rctx.execute(
-            ["tar", "-xvf", "data.tar.xz"] + pc_files + so_files,
+            ["tar", "-xvf", "data.tar.xz"] + ["./" + pc for pc in pc_files],
         )
-        pc_files_all_symlink = True
         for pc in pc_files:
             if rctx.path(pc).exists:
                 non_symlink_pc_file = pc
-                pc_files_all_symlink = False
                 break
 
     # Package has a pkgconfig, use that as the source of truth.
@@ -155,7 +234,7 @@ def _discover_contents(rctx, depends_on, target_name):
             linkopts,
             includes,
             defines,
-        ) = _process_pcconfig(pc)
+        ) = process_pcconfig(pc)
 
         static_lib = None
         shared_lib = None
@@ -163,131 +242,92 @@ def _discover_contents(rctx, depends_on, target_name):
         # Look for a static archive
         for ar in a_files:
             if ar.endswith(libname + ".a"):
-                static_lib = '":%s"' % ar.removeprefix("./")
+                static_lib = '":%s"' % ar
                 break
 
         # Look for a dynamic library
         for so_lib in so_files:
             if so_lib.endswith(libname + ".so"):
-                lib_path = so_lib.removeprefix("./")
+                lib_path = so_lib
                 path = rctx.path(lib_path)
-
-                # Check for dangling symlinks and search in the transitive closure
-                if not path.exists:
-                    candidate_path = rctx.execute(["readlink", path]).stdout.strip()
-                    build_file_content += _APT_CURSED_SYMLINK.format(
-                        name = target_name,
-                        candidates = [
-                            "@%s//:cc_export" % util.sanitize(dep)
-                            for dep in depends_on
-                        ],
-                        own_path = so_lib,
-                        candidate_path = candidate_path,
-                        out = so_lib.removeprefix("./"),
-                    )
-                    excluded_files.append(so_lib)
-
-                shared_lib = '":%s"' % so_lib.removeprefix("./")
+                shared_lib = '":%s"' % so_lib
                 break
 
         build_file_content += _CC_IMPORT_TMPL.format(
             name = target_name,
             hdrs = [
-                ":" + h.removeprefix("./")
+                ":" + h
                 for h in h_files + hpp_files
             ],
             shared_lib = shared_lib,
             static_lib = static_lib,
             includes = [
-                "external/../" + include
+                "external/.." + include
                 for include in includes
             ],
             linkopts = linkopts,
         )
 
-        # There were some pc files but they were all symlinks
-    elif pc_files_all_symlink:
-        pass
+    elif (len(hpp_files) or len(h_files)) and ((target_name.find("libc") != -1 or target_name.find("libstdc") != -1 or target_name.find("libgcc") != -1)):
+        build_file_content += _CC_LIBRARY_LIBC_TMPL.format(
+            name = target_name,
+            hdrs = [
+                ":" + h
+                for h in h_files + hpp_files
+            ],
+            srcs = [
+                # ":" + so
+                # for so in so_files
+            ],
+            additional_compiler_inputs = hpp_files_woext,
+            includes = [],
+        )
 
-        # Package has no pkgconfig, possibly a cmake based library at the
-        # standard /usr/include location and that's the only available
-        # information to turn the package into a cc_library target.
-
-    elif len(hpp_files):
+    elif len(hpp_files) or len(h_files):
         build_file_content += _CC_LIBRARY_TMPL.format(
             name = target_name,
             hdrs = [
-                ":" + h.removeprefix("./")
+                ":" + h
                 for h in h_files + hpp_files
             ],
+            additional_linker_inputs = [],
+            strip_include_prefix = "usr/include",
         )
 
-        # Package has no header files, likely a denominator package like liboost_dev
+        # Package has no header files, likely a denominator package like liboost-dev
         # since it has dependencies
 
     elif len(depends_on):
+        deps = []
+        for dep in depends_on:
+            (suite, name, arch, version) = lockfile.parse_package_key(dep)
+            deps.append(
+                "@%s//:%s" % (util.sanitize(dep), name.removesuffix("-dev")),
+            )
+
         build_file_content += _CC_LIBRARY_DEP_ONLY_TMPL.format(
             name = target_name,
-            hdrs = [],
             deps = deps,
         )
-
-    pruned_outs = []
-    if pc_files_all_symlink:
-        pruned_outs = []
+    elif len(so_files):
+        build_file_content += _CC_LIBRARY_TMPL.format(
+            name = target_name,
+            additional_linker_inputs = [
+                ":" + h
+                for h in so_files
+            ],
+            hdrs = [],
+            strip_include_prefix = "usr/include",
+        )
     else:
-        pruned_outs = [
-            sf
-            for sf in so_files
-            if sf not in excluded_files
-        ] + h_files + hpp_files + a_files
+        build_file_content += _CC_LIBRARY_TMPL.format(
+            name = target_name,
+            additional_linker_inputs = [],
+            hdrs = [],
+            strip_include_prefix = "usr/include",
+        )
 
-    return (build_file_content, pruned_outs)
-
-def _trim(str):
-    return str.rstrip(" ").lstrip(" ")
-
-def _process_pcconfig(pc):
-    (directives, variables) = pc
-    includedir = _trim(variables["includedir"])
-    libdir = _trim(variables["libdir"])
-    linkopts = []
-    includes = []
-    defines = []
-    libname = None
-    if "Libs" in directives:
-        libs = _trim(directives["Libs"]).split(" ")
-        for arg in libs:
-            if arg.startswith("-l"):
-                libname = "lib" + arg.removeprefix("-l")
-                continue
-            if arg.startswith("-L"):
-                continue
-            linkopts.append(arg)
-
-    # if "Libs.private" in directives:
-    #     libs = _trim(directives["Libs.private"]).split(" ")
-    #     linkopts.extend([arg for arg in libs if arg.startswith("-l")])
-
-    if "Cflags" in directives:
-        cflags = _trim(directives["Cflags"]).split(" ")
-        for flag in cflags:
-            if flag.startswith("-I"):
-                include = flag.removeprefix("-I")
-                includes.append(include)
-
-                # If the include is direct include eg $includedir (/usr/include/hiredis)
-                # equals to  -I/usr/include/hiredis then we need to add /usr/include into
-                # includes array to satify imports as `#include <hiredis/hiredis.h>`
-                if include == includedir:
-                    includes.append(include.removesuffix("/" + directives["Name"]))
-                elif include.startswith(includedir):
-                    includes.append(include.removesuffix("/" + directives["Name"]))
-            elif flag.startswith("-D"):
-                define = flag.removeprefix("-D")
-                defines.append(define)
-
-    return (libname, includedir, libdir, linkopts, includes, defines)
+    return (build_file_content, outs, symlinks, self_symlinks)
 
 def _deb_import_impl(rctx):
     rctx.download_and_extract(
@@ -296,17 +336,24 @@ def _deb_import_impl(rctx):
     )
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
-    cc_import_targets, so_files = _discover_contents(
+    cc_import_targets, outs, symlinks, self_symlinks = _discover_contents(
         rctx,
         rctx.attr.depends_on,
+        rctx.attr.direct_depends_on,
+        json.decode(rctx.attr.direct_depends_file_map),
         rctx.attr.package_name.removesuffix("-dev"),
     )
+
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
         mergedusr = rctx.attr.mergedusr,
         depends_on = ["@" + util.sanitize(dep_key) for dep_key in rctx.attr.depends_on],
         target_name = rctx.attr.target_name,
         cc_import_targets = cc_import_targets,
-        outs = so_files,
+        outs = outs,
+        symlinks = [value for value in symlinks.values() if value],
+        symlink_outs = [k for (k, v) in symlinks.items() if v],
+        self_symlink_outs = self_symlinks.keys(),
+        self_symlink_output_indices = self_symlinks.values(),
     ))
 
 deb_import = repository_rule(
@@ -315,6 +362,8 @@ deb_import = repository_rule(
         "urls": attr.string_list(mandatory = True, allow_empty = False),
         "sha256": attr.string(),
         "depends_on": attr.string_list(),
+        "direct_depends_on": attr.string_list(),
+        "direct_depends_file_map": attr.string(),
         "mergedusr": attr.bool(),
         "target_name": attr.string(),
         "package_name": attr.string(),

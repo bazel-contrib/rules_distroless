@@ -20,13 +20,16 @@ def _expand_value(value, variables):
             assert_in_subs()
         elif c == "}":
             assert_in_subs()
-            value_of_key = variables[key]
+            if key not in variables:
+                # fail("corrupted pc file")
+                value_of_key = ""
+            else:
+                value_of_key = variables[key]
 
             # reset subs state
             key = ""
             in_subs = False
-            if not value_of_key:
-                fail("corrupted pc file")
+
             expanded_value += value_of_key
         elif in_subs:
             key += c
@@ -63,3 +66,52 @@ def _parse_requires(re):
         return []
     deps = re.split(",")
     return [dep.strip(" ") for dep in deps if dep.strip(" ")]
+
+def _trim(str):
+    return str.rstrip(" ").lstrip(" ")
+
+def process_pcconfig(pc):
+    (directives, variables) = pc
+    includedir = ""
+    libdir = ""
+    if "includedir" in variables:
+        includedir = _trim(variables["includedir"])
+    if "libdir" in variables:
+        libdir = _trim(variables["libdir"])
+    linkopts = []
+    includes = []
+    defines = []
+    libname = None
+    if "Libs" in directives:
+        libs = _trim(directives["Libs"]).split(" ")
+        for arg in libs:
+            if arg.startswith("-l"):
+                libname = "lib" + arg.removeprefix("-l")
+                continue
+            if arg.startswith("-L"):
+                continue
+            linkopts.append(arg)
+
+    # if "Libs.private" in directives:
+    #     libs = _trim(directives["Libs.private"]).split(" ")
+    #     linkopts.extend([arg for arg in libs if arg.startswith("-l")])
+
+    if "Cflags" in directives:
+        cflags = _trim(directives["Cflags"]).split(" ")
+        for flag in cflags:
+            if flag.startswith("-I"):
+                include = flag.removeprefix("-I")
+                includes.append(include)
+
+                # If the include is direct include eg $includedir (/usr/include/hiredis)
+                # equals to  -I/usr/include/hiredis then we need to add /usr/include into
+                # includes array to satify imports as `#include <hiredis/hiredis.h>`
+                if include == includedir:
+                    includes.append(include.removesuffix("/" + directives["Name"]))
+                elif include.startswith(includedir):
+                    includes.append(include.removesuffix("/" + directives["Name"]))
+            elif flag.startswith("-D"):
+                define = flag.removeprefix("-D")
+                defines.append(define)
+
+    return (libname, includedir, libdir, linkopts, includes, defines)
