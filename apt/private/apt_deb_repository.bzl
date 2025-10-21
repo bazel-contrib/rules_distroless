@@ -77,6 +77,71 @@ def _fetch_package_index(mctx, urls, dist, comp, arch, integrity):
 
     return ("{}/Packages".format(target_triple), url, integrity)
 
+def _fetch_contents(mctx, urls, dist, comp, arch, integrity):
+    target_triple = "{dist}/{comp}/{arch}".format(dist = dist, comp = comp, arch = arch)
+
+    # See https://linux.die.net/man/1/xz , https://linux.die.net/man/1/gzip , and https://linux.die.net/man/1/bzip2
+    #  --keep       -> keep the original file (Bazel might be still committing the output to the cache)
+    #  --force      -> overwrite the output if it exists
+    #  --decompress -> decompress
+    # Order of these matter, we want to try the one that is most likely first.
+    supported_extensions = [
+        (".gz", ["gzip", "--decompress", "--keep", "--force"]),
+        (".xz", ["xz", "--decompress", "--keep", "--force"]),
+        (".bz2", ["bzip2", "--decompress", "--keep", "--force"]),
+        ("", ["true"]),
+    ]
+
+    failed_attempts = []
+
+    url = None
+    base_auth = _get_auth(mctx, urls)
+    for url in urls:
+        download = None
+        for (ext, cmd) in supported_extensions:
+            output = "{}/Contents{}".format(target_triple, ext)
+            dist_url = "{}/dists/{}/{}/Contents-{}{}".format(url, dist, comp, arch, ext)
+            auth = {}
+            if url in base_auth:
+                auth = {dist_url: base_auth[url]}
+            download = mctx.download(
+                url = dist_url,
+                output = output,
+                integrity = integrity,
+                allow_fail = True,
+                auth = auth,
+            )
+            decompress_r = None
+            if download.success:
+                decompress_r = mctx.execute(cmd + [output])
+                if decompress_r.return_code == 0:
+                    integrity = download.integrity
+                    break
+
+            failed_attempts.append((dist_url, download, decompress_r))
+
+        if download.success:
+            break
+
+    if len(failed_attempts) == len(supported_extensions) * len(urls):
+        attempt_messages = []
+        for (failed_url, download, decompress) in failed_attempts:
+            reason = "unknown"
+            if not download.success:
+                reason = "Download failed. See warning above for details."
+            elif decompress.return_code != 0:
+                reason = "Decompression failed with non-zero exit code.\n\n{}\n{}".format(decompress.stderr, decompress.stdout)
+
+            attempt_messages.append("""\n*) Failed '{}'\n\n{}""".format(failed_url, reason))
+
+        fail("""
+** Tried to download {} different package indices and all failed.
+
+{}
+        """.format(len(failed_attempts), "\n".join(attempt_messages)))
+
+    return ("{}/Contents".format(target_triple), url, integrity)
+
 def _parse_repository(state, contents, roots, dist):
     last_key = ""
     pkg = {}
@@ -110,6 +175,17 @@ def _parse_repository(state, contents, roots, dist):
             _add_package(state, pkg)
             last_key = ""
             pkg = {}
+
+def _parse_contents(state, rcontents, arch):
+    contents = state.filemap.setdefault(arch, {})
+    for line in rcontents.splitlines():
+        last_empty_char = line.rfind(" ")
+        first_empty_char = line.find(" ")
+        filepath = line[:first_empty_char]
+        pkgs = line[last_empty_char + 1:].split(",")
+        for pkg in pkgs:
+            contents.setdefault(pkg[pkg.find("/") + 1:], []).append(filepath)
+    state.filemap[arch] = contents
 
 def _add_package(state, package):
     util.set_dict(
@@ -161,6 +237,14 @@ def _package_versions(state, name, arch):
 def _package(state, name, version, arch):
     return util.get_dict(state.packages, keys = (arch, name, version))
 
+def _filemap(state, name, arch):
+    if arch not in state.filemap:
+        return None
+    all = state.filemap[arch]
+    if name not in all:
+        return None
+    return state.filemap[arch][name]
+
 def _fetch_and_parse_sources(state):
     mctx = state.mctx
     facts = state.facts
@@ -176,16 +260,25 @@ def _fetch_and_parse_sources(state):
         # on misconfigured HTTP servers)
         urls = [url.rstrip("/") for url in urls]
 
-        fact_key = dist + "/" + component + "/" + architecture
-        fact_value = facts.get(fact_key, "")
+        fact_key = dist + "/" + component + "/" + architecture + "/Packages"
 
-        mctx.report_progress("Fetching package index: {}/{} for {}".format(dist, component, architecture))
-        (output, url, integrity) = _fetch_package_index(mctx, urls, dist, component, architecture, fact_value)
+        mctx.report_progress("fetching Package indices: {}/{} for {}".format(dist, component, architecture))
+        (output, url, integrity) = _fetch_package_index(mctx, urls, dist, component, architecture, facts.get(fact_key, ""))
 
         facts[fact_key] = integrity
 
-        mctx.report_progress("Parsing package index: {}/{} for {}".format(dist, component, architecture))
+        mctx.report_progress("parsing Package indices: {}/{} for {}".format(dist, component, architecture))
         _parse_repository(state, mctx.read(output), urls, dist)
+
+        fact_key = dist + "/" + component + "/" + architecture + "/Contents"
+
+        mctx.report_progress("fetching Contents: {}/{} for {}".format(dist, component, architecture))
+        (output, url, integrity) = _fetch_contents(mctx, urls, dist, component, architecture, facts.get(fact_key, ""))
+
+        facts[fact_key] = integrity
+
+        mctx.report_progress("parsing Contents: {}/{} for {}".format(dist, component, architecture))
+        _parse_contents(state, mctx.read(output), architecture)
 
 def _add_source_if_not_present(state, source):
     (urls, dist, components, architectures) = source
@@ -209,6 +302,7 @@ def _create(mctx, facts):
     state = struct(
         mctx = mctx,
         sources = dict(),
+        filemap = dict(),
         packages = dict(),
         virtual_packages = dict(),
         facts = facts,
@@ -220,6 +314,7 @@ def _create(mctx, facts):
         package_versions = lambda **kwargs: _package_versions(state, **kwargs),
         virtual_packages = lambda **kwargs: _virtual_packages(state, **kwargs),
         package = lambda **kwargs: _package(state, **kwargs),
+        filemap = lambda **kwargs: _filemap(state, **kwargs),
     )
 
 deb_repository = struct(

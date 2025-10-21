@@ -6,12 +6,13 @@ def _apt_cursed_symlink(ctx):
     found = None
 
     for file in ctx.files.candidates:
+        print(file.path)
         if file.path.endswith(candidate_full_path):
             found = file
             break
 
     if not found:
-        fail("Failed to find the candidate so library. file an issue.")
+        fail("Failed to find the candidate so library for {} in {}. file an issue.".format(ctx.attr.candidate_path, ctx.attr.candidates))
 
     ctx.actions.symlink(
         output = ctx.outputs.out,

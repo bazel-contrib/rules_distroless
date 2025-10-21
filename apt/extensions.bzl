@@ -93,7 +93,9 @@ def _distroless_extension(mctx):
                     resolved_count = 0
 
                     mctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
-                    (package, dependencies, unmet_dependencies, warnings) = resolver.resolve_all(
+
+                    # TODO: Flattening approach of resolving dependencies has to change.
+                    (package, dependencies, unmet_dependencies, direct_dependencies, warnings) = resolver.resolve_all(
                         name = constraint["name"],
                         version = constraint["version"],
                         arch = arch,
@@ -130,6 +132,14 @@ def _distroless_extension(mctx):
                         glock.add_package(dep)
                         glock.add_package_dependency(package, dep)
 
+                        # Also populate direct dependencies of transitive dependencies
+                        # This is needed because resolver flattens the transitive closure.
+                        # TODO: ditch transitive closure flattening and work around the
+                        # recursive dependencies some other way.
+                        if dep["Package"] in direct_dependencies:
+                            for direct_dep in direct_dependencies[dep["Package"]]:
+                                glock.add_package_direct_dependency(dep, direct_dep)
+
                     # Add it to dependency set
                     arch_set = dependency_set["sets"].setdefault(arch, {})
                     arch_set[lockfile.short_package_key(package)] = package["Version"]
@@ -156,6 +166,13 @@ def _distroless_extension(mctx):
 
     # Generate a repo per package which will be aliased by hub repo.
     for (package_key, package) in glock.packages().items():
+        filemap = {}
+        for key in package["direct_depends_on"] + package["depends_on"]:
+            (suite, name, arch, version) = lockfile.parse_package_key(key)
+            filemap[name] = repo.filemap(
+                name = name,
+                arch = arch,
+            )
         deb_import(
             name = util.sanitize(package_key),
             target_name = util.sanitize(package_key),
@@ -166,6 +183,8 @@ def _distroless_extension(mctx):
             sha256 = package["sha256"],
             mergedusr = False,
             depends_on = package["depends_on"],
+            direct_depends_file_map = json.encode(filemap),
+            direct_depends_on = package["direct_depends_on"],
             package_name = package["name"],
         )
 
