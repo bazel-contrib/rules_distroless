@@ -39,7 +39,6 @@ def _add_package(lock, package):
         "section": package["Section"],
         "size": int(package["Size"]),
         "depends_on": [],
-        "direct_depends_on": [],
     }
 
 def _add_package_dependency(lock, package, dependency):
@@ -50,15 +49,6 @@ def _add_package_dependency(lock, package, dependency):
     if sk in lock.packages[k]["depends_on"]:
         return
     lock.packages[k]["depends_on"].append(sk)
-
-def _add_package_direct_dependency(lock, package, dependency):
-    k = _package_key(package)
-    if k not in lock.packages:
-        fail("illegal state: %s is not in the lockfile." % package["Package"])
-    sk = _package_key(dependency)
-    if sk in lock.packages[k]["direct_depends_on"]:
-        return
-    lock.packages[k]["direct_depends_on"].append(sk)
 
 def _has_package(lock, suite, name, version, arch):
     return _make_package_key(suite, name, version, arch) in lock.packages
@@ -77,7 +67,6 @@ def _create(mctx, lock):
         add_source = lambda *args, **kwargs: _add_source(lock, *args, **kwargs),
         add_package = lambda *args, **kwargs: _add_package(lock, *args, **kwargs),
         add_package_dependency = lambda *args, **kwargs: _add_package_dependency(lock, *args, **kwargs),
-        add_package_direct_dependency = lambda *args, **kwargs: _add_package_direct_dependency(lock, *args, **kwargs),
         packages = lambda: lock.packages,
         sources = lambda: lock.sources,
         dependency_sets = lambda: lock.dependency_sets,

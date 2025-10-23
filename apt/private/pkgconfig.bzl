@@ -80,21 +80,41 @@ def process_pcconfig(pc):
         libdir = _trim(variables["libdir"])
     linkopts = []
     includes = []
+    link_paths = []
     defines = []
     libname = None
+
+    IGNORE = [
+        "-licui18n",
+        "-licuuc",
+        "-licudata",
+        "-lz",
+        "-llzma",
+    ]
+
     if "Libs" in directives:
         libs = _trim(directives["Libs"]).split(" ")
         for arg in libs:
-            if arg.startswith("-l"):
-                libname = "lib" + arg.removeprefix("-l")
+            if arg in IGNORE:
                 continue
             if arg.startswith("-L"):
+                link_paths.append(arg.removeprefix("-L"))
+                linkopts.append("-Wl,-rpath=" + arg.removeprefix("-L"))
+                continue
+            elif arg.startswith("-l") and not libname:
+                libname = "lib" + arg.removeprefix("-l")
+                continue
+            if arg == "-licudata":
                 continue
             linkopts.append(arg)
 
-    # if "Libs.private" in directives:
-    #     libs = _trim(directives["Libs.private"]).split(" ")
-    #     linkopts.extend([arg for arg in libs if arg.startswith("-l")])
+    if "Libs.private" in directives:
+        libs = _trim(directives["Libs.private"]).split(" ")
+        for arg in libs:
+            if arg in IGNORE:
+                continue
+            if arg.startswith("-l"):
+                linkopts.append(arg)
 
     if "Cflags" in directives:
         cflags = _trim(directives["Cflags"]).split(" ")
@@ -113,5 +133,18 @@ def process_pcconfig(pc):
             elif flag.startswith("-D"):
                 define = flag.removeprefix("-D")
                 defines.append(define)
+    return (libname, includedir, libdir, linkopts, link_paths, includes, defines)
 
-    return (libname, includedir, libdir, linkopts, includes, defines)
+def pkgconfig(rctx, path):
+    pc = parse_pc(rctx.read(path))
+    (libname, includedir, libdir, linkopts, link_paths, includes, defines) = process_pcconfig(pc)
+
+    return struct(
+        libname = libname,
+        includedir = includedir,
+        libdir = libdir,
+        linkopts = linkopts,
+        link_paths = link_paths,
+        includes = includes,
+        defines = defines,
+    )

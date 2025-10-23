@@ -11,6 +11,8 @@ load("//apt/private:version_constraint.bzl", "version_constraint")
 # https://wiki.debian.org/SupportedArchitectures
 ALL_SUPPORTED_ARCHES = ["armel", "armhf", "arm64", "i386", "amd64", "mips64el", "ppc64el", "x390x"]
 
+ITERATION_MAX = 2147483646
+
 def _parse_source(src):
     parts = src.split(" ")
     kind = parts.pop(0)
@@ -71,89 +73,119 @@ def _distroless_extension(mctx):
     sources = glock.sources()
     dependency_sets = glock.dependency_sets()
 
+    resolution_queue = []
+    already_resolved = {}
+
     for mod in mctx.modules:
         for install in mod.tags.install:
-            dependency_set = dependency_sets.setdefault(install.dependency_set, {
-                "sets": {},
-            })
             for dep_constraint in install.packages:
                 constraint = version_constraint.parse_dep(dep_constraint)
-
-                architectures = []
-
-                if constraint["arch"]:
-                    architectures = constraint["arch"]
-                else:
-                    architectures = ["amd64"]
-
-                for _ in range(len(ALL_SUPPORTED_ARCHES)):
-                    if len(architectures) == 0:
-                        break
-                    arch = architectures.pop()
-                    resolved_count = 0
-
-                    mctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
-
-                    # TODO: Flattening approach of resolving dependencies has to change.
-                    (package, dependencies, unmet_dependencies, direct_dependencies, warnings) = resolver.resolve_all(
-                        name = constraint["name"],
-                        version = constraint["version"],
-                        arch = arch,
-                        include_transitive = install.include_transitive,
-                    )
-
-                    if not package:
-                        fail(
-                            "\n\nUnable to locate package `%s` for %s. It may only exist for specific set of architectures. \n" % (dep_constraint, arch) +
-                            "   1 - Ensure that the package is available for the specified architecture. \n" +
-                            "   2 - Ensure that the specified version of the package is available for the specified architecture. \n" +
-                            "   3 - Ensure that an apt.source_list added for the specified architecture.",
-                        )
-
-                    for warning in warnings:
-                        util.warning(mctx, warning)
-
-                    if len(unmet_dependencies):
-                        util.warning(
-                            mctx,
-                            "Following dependencies could not be resolved for %s: %s" % (constraint["name"], ",".join([up[0] for up in unmet_dependencies])),
-                        )
-
-                    # TODO:
-                    # Ensure following statements are true.
-                    #  1- Package was resolved from a source that module listed explicitly.
-                    #  2- Package resolution was skipped because some other module asked for this package.
-                    #  3- 1) is enforced even if 2) is the case.
-                    glock.add_package(package)
-
-                    resolved_count += len(dependencies) + 1
-
-                    for dep in dependencies:
-                        glock.add_package(dep)
-                        glock.add_package_dependency(package, dep)
-
-                        # Also populate direct dependencies of transitive dependencies
-                        # This is needed because resolver flattens the transitive closure.
-                        # TODO: ditch transitive closure flattening and work around the
-                        # recursive dependencies some other way.
-                        if dep["Package"] in direct_dependencies:
-                            for direct_dep in direct_dependencies[dep["Package"]]:
-                                glock.add_package_direct_dependency(dep, direct_dep)
-
-                    # Add it to dependency set
-                    arch_set = dependency_set["sets"].setdefault(arch, {})
-                    arch_set[lockfile.short_package_key(package)] = package["Version"]
-
+                architectures = constraint["arch"]
+                if not architectures:
                     # For cases where architecture for the package is not specified we need
                     # to first find out which source contains the package. in order to do
                     # that we first need to resolve the package for amd64 architecture.
                     # Once the repository is found, then resolve the package for all the
                     # architectures the repository supports.
-                    if not constraint["arch"] and arch == "amd64":
-                        source = sources[package["Dist"]]
-                        architectures = [a for a in source["architectures"] if a != "amd64"]
+                    (package, warning) = resolver.resolve_package(
+                        name = constraint["name"],
+                        version = constraint["version"],
+                        arch = "amd64",
+                    )
+                    if warning:
+                        util.warning(mctx, warning)
 
-                mctx.report_progress("Resolved %d packages for %s" % (resolved_count, arch))
+                    # If the package is not found then add the package
+                    # to the resolution_queue to let the resolver handle
+                    # the error messages.
+                    if not package:
+                        resolution_queue.append((
+                            install.dependency_set,
+                            constraint["name"],
+                            constraint["version"],
+                            "amd64",
+                        ))
+                        continue
+
+                    source = sources[package["Dist"]]
+                    architectures = source["architectures"]
+
+                for arch in architectures:
+                    resolution_queue.append((
+                        install.dependency_set,
+                        constraint["name"],
+                        constraint["version"],
+                        arch,
+                    ))
+
+    for i in range(0, ITERATION_MAX + 1):
+        if not len(resolution_queue):
+            break
+        if i == ITERATION_MAX:
+            fail("apt.install exhausted, please file a bug")
+
+        (dependency_set_name, name, version, arch) = resolution_queue.pop()
+
+        mctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
+
+        # TODO: Flattening approach of resolving dependencies has to change.
+        (package, dependencies, unmet_dependencies, warnings) = resolver.resolve_all(
+            name = name,
+            version = version,
+            arch = arch,
+            include_transitive = install.include_transitive,
+        )
+
+        if not package:
+            fail(
+                "\n\nUnable to locate package `%s` for %s. It may only exist for specific set of architectures. \n" % (name, arch) +
+                "   1 - Ensure that the package is available for the specified architecture. \n" +
+                "   2 - Ensure that the specified version of the package is available for the specified architecture. \n" +
+                "   3 - Ensure that an apt.source_list added for the specified architecture.",
+            )
+
+        for warning in warnings:
+            util.warning(mctx, warning)
+
+        if len(unmet_dependencies):
+            util.warning(
+                mctx,
+                "Following dependencies could not be resolved for %s: %s" % (
+                    name,
+                    ",".join([up[0] for up in unmet_dependencies]),
+                ),
+            )
+
+        # TODO:
+        # Ensure following statements are true.
+        #  1- Package was resolved from a source that module listed explicitly.
+        #  2- Package resolution was skipped because some other module asked for this package.
+        #  3- 1) is enforced even if 2) is the case.
+        glock.add_package(package)
+
+        pkg_short_key = lockfile.short_package_key(package)
+
+        already_resolved[pkg_short_key] = True
+
+        for dep in dependencies:
+            glock.add_package(dep)
+            dep_key = lockfile.short_package_key(dep)
+            if dep_key not in already_resolved:
+                resolution_queue.append((
+                    None,
+                    dep["Package"],
+                    ("=", dep["Version"]),
+                    arch,
+                ))
+            glock.add_package_dependency(package, dep)
+
+        # Add it to dependency set
+        if dependency_set_name:
+            dependency_set = dependency_sets.setdefault(dependency_set_name, {
+                "sets": {},
+            })
+            arch_set = dependency_set["sets"].setdefault(arch, {})
+            arch_set[pkg_short_key] = package["Version"]
 
     # Generate a hub repo for every dependency set
     lock_content = glock.as_json()
@@ -167,12 +199,13 @@ def _distroless_extension(mctx):
     # Generate a repo per package which will be aliased by hub repo.
     for (package_key, package) in glock.packages().items():
         filemap = {}
-        for key in package["direct_depends_on"] + package["depends_on"]:
+        for key in package["depends_on"]:
             (suite, name, arch, version) = lockfile.parse_package_key(key)
             filemap[name] = repo.filemap(
                 name = name,
                 arch = arch,
             )
+
         deb_import(
             name = util.sanitize(package_key),
             target_name = util.sanitize(package_key),
@@ -183,8 +216,7 @@ def _distroless_extension(mctx):
             sha256 = package["sha256"],
             mergedusr = False,
             depends_on = package["depends_on"],
-            direct_depends_file_map = json.encode(filemap),
-            direct_depends_on = package["direct_depends_on"],
+            depends_file_map = json.encode(filemap),
             package_name = package["name"],
         )
 

@@ -24,6 +24,7 @@ def _resolve_package(state, name, version, arch):
         return (candidates[0], warning)
 
     if len(candidates) > 1:
+        versions = {}
         for package in candidates:
             # Return 'required' packages immediately since it is implicit that
             # they should exist on a default debian install.
@@ -36,22 +37,20 @@ def _resolve_package(state, name, version, arch):
             # In the case of required packages, these defaults are not specified.
             if "Priority" in package and package["Priority"] == "required":
                 return (package, warning)
+            versions[package["Version"]] = package
 
-        # Sometimes they are provided by multiple versions of the same library
-        if len({c["Package"]: None for c in candidates}.keys()) == 1:
-            versions = [c["Version"] for c in candidates]
-            selected_version = 0
-            for i in range(1, len(versions)):
-                if version_constraint.relop(versions[i], versions[selected_version], ">>"):
-                    selected_version = i
-            return candidates[selected_version]
+        sortedversions = version_lib.sort(versions.keys(), reverse = True)
 
-        # Otherwise, we can't disambiguate the virtual package providers so
-        # choose none and warn.
-        warning = "Multiple candidates for virtual package '{}': {}".format(
-            name,
-            ", ".join([package["Package"] for package in candidates]),
-        )
+        # First element in the versions list is the latest version.
+        selected_version = sortedversions[0]
+        return (versions[selected_version], warning)
+
+        # # Otherwise, we can't disambiguate the virtual package providers so
+        # # choose none and warn.
+        # warning = "Multiple candidates for virtual package '{}': {}".format(
+        #     name,
+        #     ", ".join([package["Package"] + "" + package["Version"] for package in candidates]),
+        # )
 
     # Get available versions of the package
     versions_by_arch = state.repository.package_versions(name = name, arch = arch)
@@ -95,7 +94,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
     # state variables
     already_recursed = {}
     dependency_group = []
-    stack = [(name, version, -1, None)]
+    stack = [(name, version, -1)]
     warnings = []
 
     path = []
@@ -106,7 +105,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         if i == _ITERATION_MAX_:
             fail("resolve_all exhausted")
 
-        (name, version, dependency_group_idx, requested_by) = stack.pop()
+        (name, version, dependency_group_idx) = stack.pop()
 
         # If this iteration is part of a dependency group, and the dependency group is already met, then skip this iteration.
         if dependency_group_idx > -1 and dependency_group[dependency_group_idx][0]:
@@ -118,9 +117,6 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         (package, warning) = _resolve_package(state, name, version, arch)
         if warning:
             warnings.append(warning)
-
-        if package and requested_by and package["Package"] != requested_by and package["Package"] not in already_recursed:
-            direct_dependencies.setdefault(requested_by, []).append(package)
 
         # Unmet optional dependency encountered
         # If this package is not found and is part of a dependency group, then just skip it.
@@ -150,7 +146,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         # Do not add dependency if it's a root package to avoid circular dependency.
         if i != 0 and key != root_package["Package"]:
             # Add it to the dependencies
-            already_recursed[key] = True
+            already_recursed[key] = package["Version"]
             dependencies.append(package)
 
         deps = []
@@ -173,16 +169,16 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
                 # stack it means we need to push in reverse order.
                 for gdep in reversed(dep):
                     # TODO: arch
-                    stack.append((gdep["name"], gdep["version"], new_dependency_group_idx, package["Package"]))
+                    stack.append((gdep["name"], gdep["version"], new_dependency_group_idx))
             else:
                 # TODO: arch
-                stack.append((dep["name"], dep["version"], -1, package["Package"]))
+                stack.append((dep["name"], dep["version"], -1))
 
     for (met, dep) in dependency_group:
         if not met:
             unmet_dependencies.append((dep, None))
 
-    return (root_package, dependencies, unmet_dependencies, direct_dependencies, warnings)
+    return (root_package, dependencies, unmet_dependencies, warnings)
 
 def _create_resolution(repository):
     state = struct(repository = repository)
