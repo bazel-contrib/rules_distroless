@@ -36,10 +36,10 @@ bzl_library(
     srcs = ["group.bzl"],
     visibility = ["//distroless:__subpackages__"],
     deps = [
-        "@aspect_bazel_lib//lib:expand_template",
-        "@aspect_bazel_lib//lib:tar",
-        "@aspect_bazel_lib//lib:utils",
+        "@bazel_lib//lib:expand_template",
+        "@bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
+        "@tar.bzl//tar:tar",
     ],
 )
 
@@ -48,9 +48,9 @@ bzl_library(
     srcs = ["os_release.bzl"],
     visibility = ["//distroless:__subpackages__"],
     deps = [
-        "@aspect_bazel_lib//lib:expand_template",
-        "@aspect_bazel_lib//lib:tar",
-        "@aspect_bazel_lib//lib:utils",
+        "@bazel_lib//lib:expand_template",
+        "@tar.bzl//tar:tar",
+        "@bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
     ],
 )
@@ -61,9 +61,9 @@ bzl_library(
     visibility = ["//distroless:__subpackages__"],
     deps = [
         ":util",
-        "@aspect_bazel_lib//lib:expand_template",
-        "@aspect_bazel_lib//lib:tar",
-        "@aspect_bazel_lib//lib:utils",
+        "@bazel_lib//lib:expand_template",
+        "@tar.bzl//tar:tar",
+        "@bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
     ],
 )
@@ -82,7 +82,7 @@ bzl_library(
     deps = [
         ":tar",
         ":util",
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar",
     ],
 )
 
@@ -101,7 +101,7 @@ bzl_library(
         "//distroless:__subpackages__",
     ],
     deps = [
-        "@aspect_bazel_lib//lib:tar",
+        "@tar.bzl//tar:tar",
         "@bazel_skylib//lib:sets",
     ],
 )

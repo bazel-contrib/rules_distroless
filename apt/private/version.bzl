@@ -1,6 +1,6 @@
 "parse debian version strings"
 
-load("@aspect_bazel_lib//lib:strings.bzl", "ord")
+load("@bazel_lib//lib:strings.bzl", "ord")
 
 # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 # https://github.com/Debian/apt/blob/main/apt-pkg/deb/debversion.cc
