@@ -97,8 +97,13 @@ apt.install(
     nolock = True,
 )
 apt.install(
+    name = "unique_dependencies",
+    manifest = "//apt/tests/resolution:dependencies.yaml",
+    nolock = True,
+)
+apt.install(
     name = "clang",
     manifest = "apt/tests/resolution/clang.yaml",
     nolock = True,
 )
-use_repo(apt, "arch_all_test", "arch_all_test_resolve", "bullseye", "bullseye_nolock", "clang", "noble", "resolution_test", "resolution_test_empty_lock_resolve", "resolution_test_resolve")
+use_repo(apt, "arch_all_test", "arch_all_test_resolve", "bullseye", "bullseye_nolock", "clang", "noble", "resolution_test", "resolution_test_empty_lock_resolve", "resolution_test_resolve", "unique_dependencies_resolve")

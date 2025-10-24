@@ -1,5 +1,6 @@
 "lock"
 
+load("@bazel_skylib//lib:new_sets.bzl", "sets")
 load(":util.bzl", "util")
 
 def _make_package_key(name, version, arch):
@@ -29,17 +30,22 @@ def _add_package(lock, package, arch):
         "dependencies": [],
     })
     lock.fast_package_lookup[k] = len(lock.packages) - 1
+    lock.fast_package_dependencies_lookup[k] = sets.make()
 
 def _add_package_dependency(lock, package, dependency, arch):
     k = _package_key(package, arch)
     if k not in lock.fast_package_lookup:
         fail("Broken state: %s is not in the lockfile." % package["Package"])
     i = lock.fast_package_lookup[k]
-    lock.packages[i]["dependencies"].append(dict(
-        key = _package_key(dependency, arch),
-        name = dependency["Package"],
-        version = dependency["Version"],
-    ))
+
+    dependency_key = _package_key(dependency, arch)
+    if not sets.contains(lock.fast_package_dependencies_lookup[k], dependency_key):
+        lock.packages[i]["dependencies"].append(dict(
+            key = dependency_key,
+            name = dependency["Package"],
+            version = dependency["Version"],
+        ))
+        lock.fast_package_dependencies_lookup[k] = sets.insert(lock.fast_package_dependencies_lookup[k], dependency_key)
 
 def _has_package(lock, name, version, arch):
     key = "%s_%s_%s" % (util.sanitize(name), util.sanitize(version), arch)
@@ -60,6 +66,7 @@ def _empty(rctx):
         version = 1,
         packages = list(),
         fast_package_lookup = dict(),
+        fast_package_dependencies_lookup = dict(),
     )
     return _create(rctx, lock)
 
@@ -75,6 +82,7 @@ def _from_json(rctx, content):
         version = lock["version"],
         packages = lock["packages"],
         fast_package_lookup = dict(),
+        fast_package_dependencies_lookup = dict(),
     )
     for (i, package) in enumerate(lock.packages):
         # TODO: only support urls before 1.0
@@ -83,6 +91,7 @@ def _from_json(rctx, content):
 
         lock.packages[i] = package
         lock.fast_package_lookup[package["key"]] = i
+        lock.fast_package_dependencies_lookup[package["key"]] = sets.make([d["key"] for d in package["dependencies"]])
     return _create(rctx, lock)
 
 lockfile = struct(
