@@ -1,0 +1,13 @@
+diff --git a/oci/defs.bzl b/oci/defs.bzl
+index bee3503..7caeb58 100644
+--- a/oci/defs.bzl
++++ b/oci/defs.bzl
+@@ -160,7 +160,7 @@ def oci_image(name, labels = None, annotations = None, env = None, cmd = None, e
+         name = name + ".digest",
+         args = ["--raw-output"],
+         srcs = ["_{}_index.json".format(name)],
+-        filter = """.manifests[0].digest""",
++        filter = """.manifests[0].digest | sub("\""; "")""",
+         out = name + ".json.sha256",  # path chosen to match rules_docker for easy migration
+         **forwarded_kwargs
+     )
