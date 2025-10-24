@@ -1,7 +1,10 @@
 # See https://docs.aspect.build/workflows/configuration
 workspaces:
   - .
-  - e2e/smoke
+  - e2e/smoke:
+      tasks:
+        - buildifier:
+            without: true
 tasks:
   - buildifier:
   - test:
