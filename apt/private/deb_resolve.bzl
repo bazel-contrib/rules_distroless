@@ -1,6 +1,6 @@
 "repository rule for resolving and generating lockfile"
 
-load("@aspect_bazel_lib//lib:repo_utils.bzl", "repo_utils")
+load("@bazel_lib//lib:repo_utils.bzl", "repo_utils")
 load(":apt_deb_repository.bzl", "deb_repository")
 load(":apt_dep_resolver.bzl", "dependency_resolver")
 load(":lockfile.bzl", "lockfile")

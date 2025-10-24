@@ -1,8 +1,8 @@
 "os release"
 
-load("@aspect_bazel_lib//lib:tar.bzl", "tar")
-load("@aspect_bazel_lib//lib:utils.bzl", "propagate_common_rule_attributes")
+load("@bazel_lib//lib:utils.bzl", "propagate_common_rule_attributes")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@tar.bzl//tar:tar.bzl", "tar")
 load(":tar.bzl", "tar_lib")
 
 def os_release(

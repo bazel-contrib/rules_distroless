@@ -1,4 +1,4 @@
-load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
 load("//distroless:defs.bzl", "group")
 load("//distroless/tests:asserts.bzl", "assert_tar_mtree")
 
