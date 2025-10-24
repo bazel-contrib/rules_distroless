@@ -43,7 +43,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
             -s "#^\\./lib64/\\(.\\)#./usr/lib64/\\1#" \
             -s "#^\\./libx32/\\(.\\)#./usr/libx32/\\1#" \
             "@$$data_file" 2< <(
-                $(BSDTAR_BIN) -tvf "$$data_file" | awk '{
+                $(BSDTAR_BIN) -tvf "$$data_file" | $(location @gawk//:gawk) '{
                     ORS=""
                     keep="y"
                     if (substr($$1, 1, 1) == "d" && (\\
@@ -92,5 +92,6 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
         %s
         """ % apply,
         toolchains = toolchains,
+        tools = ["@gawk//:gawk"],
         **kwargs
     )
