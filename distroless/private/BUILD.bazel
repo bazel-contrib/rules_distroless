@@ -49,9 +49,9 @@ bzl_library(
     visibility = ["//distroless:__subpackages__"],
     deps = [
         "@bazel_lib//lib:expand_template",
-        "@tar.bzl//tar:tar",
         "@bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
+        "@tar.bzl//tar:tar",
     ],
 )
 
@@ -62,9 +62,9 @@ bzl_library(
     deps = [
         ":util",
         "@bazel_lib//lib:expand_template",
-        "@tar.bzl//tar:tar",
         "@bazel_lib//lib:utils",
         "@bazel_skylib//rules:write_file",
+        "@tar.bzl//tar:tar",
     ],
 )
 
@@ -101,8 +101,8 @@ bzl_library(
         "//distroless:__subpackages__",
     ],
     deps = [
-        "@tar.bzl//tar:tar",
         "@bazel_skylib//lib:sets",
+        "@tar.bzl//tar:tar",
     ],
 )
 
