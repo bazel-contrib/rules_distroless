@@ -3,6 +3,7 @@ workspaces:
   - .
   - e2e/smoke
 tasks:
+  - buildifier:
   - test:
       queue: aspect-large
 notifications:
