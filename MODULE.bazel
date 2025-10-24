@@ -12,6 +12,16 @@ bazel_dep(name = "bazel_skylib", version = "1.5.0")
 bazel_dep(name = "rules_java", version = "8.8.0")
 bazel_dep(name = "rules_shell", version = "0.4.1")
 bazel_dep(name = "tar.bzl", version = "0.6.0")
+bazel_dep(name = "yq.bzl", version = "0.3.1")
+
+yq_toolchains = use_extension("@yq.bzl//yq:extensions.bzl", "yq")
+use_repo(yq_toolchains, "yq_darwin_amd64")
+use_repo(yq_toolchains, "yq_darwin_arm64")
+use_repo(yq_toolchains, "yq_linux_amd64")
+use_repo(yq_toolchains, "yq_linux_arm64")
+use_repo(yq_toolchains, "yq_linux_ppc64le")
+use_repo(yq_toolchains, "yq_linux_s390x")
+use_repo(yq_toolchains, "yq_windows_amd64")
 
 bazel_lib_toolchains = use_extension("@bazel_lib//lib:extensions.bzl", "toolchains")
 use_repo(bazel_lib_toolchains, "zstd_toolchains")
@@ -26,16 +36,6 @@ bazel_dep(name = "buildifier_prebuilt", version = "8.0.1", dev_dependency = True
 bazel_dep(name = "rules_oci", version = "2.0.0", dev_dependency = True)
 bazel_dep(name = "container_structure_test", version = "1.21.1", dev_dependency = True)
 bazel_dep(name = "jq.bzl", version = "0.4.0", dev_dependency = True)
-bazel_dep(name = "yq.bzl", version = "0.3.1", dev_dependency = True)
-
-yq_toolchains = use_extension("@yq.bzl//yq:extensions.bzl", "yq", dev_dependency = True)
-use_repo(yq_toolchains, "yq_darwin_amd64")
-use_repo(yq_toolchains, "yq_darwin_arm64")
-use_repo(yq_toolchains, "yq_linux_amd64")
-use_repo(yq_toolchains, "yq_linux_arm64")
-use_repo(yq_toolchains, "yq_linux_ppc64le")
-use_repo(yq_toolchains, "yq_linux_s390x")
-use_repo(yq_toolchains, "yq_windows_amd64")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
