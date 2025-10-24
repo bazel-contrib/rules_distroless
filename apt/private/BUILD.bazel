@@ -70,7 +70,7 @@ bzl_library(
         ":apt_deb_repository",
         ":apt_dep_resolver",
         ":lockfile",
-        "@aspect_bazel_lib//lib:repo_utils",
+        "@bazel_lib//lib:repo_utils",
     ],
 )
 
@@ -78,7 +78,7 @@ bzl_library(
     name = "version",
     srcs = ["version.bzl"],
     visibility = ["//apt:__subpackages__"],
-    deps = ["@aspect_bazel_lib//lib:strings"],
+    deps = ["@bazel_lib//lib:strings"],
 )
 
 bzl_library(

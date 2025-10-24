@@ -5,7 +5,7 @@ bzl_library(
     srcs = ["asserts.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        "@aspect_bazel_lib//lib:diff_test",
+        "@bazel_lib//lib:diff_test",
         "@bazel_skylib//rules:write_file",
     ],
 )

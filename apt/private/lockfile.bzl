@@ -51,7 +51,7 @@ def _create(rctx, lock):
         add_package = lambda *args, **kwargs: _add_package(lock, *args, **kwargs),
         add_package_dependency = lambda *args, **kwargs: _add_package_dependency(lock, *args, **kwargs),
         packages = lambda: lock.packages,
-        write = lambda out: rctx.file(out, json.encode_indent(struct(version = lock.version, packages = lock.packages))),
+        write = lambda out: rctx.file(out, json.encode_indent(struct(version = lock.version, packages = lock.packages)), executable = False),
         as_json = lambda: json.encode_indent(struct(version = lock.version, packages = lock.packages)),
     )
 
