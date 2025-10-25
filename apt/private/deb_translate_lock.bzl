@@ -39,7 +39,7 @@ alias(
 
 filegroup(
     name = "{target_name}",
-    srcs = select({deps}) + [":data"],
+    srcs = select({deps}),
     visibility = ["//visibility:public"],
 )
 '''
