@@ -39,7 +39,7 @@ alias(
 
 filegroup(
     name = "{target_name}",
-    srcs = select({deps}) + [":data"],
+    srcs = select({deps}),
     visibility = ["//visibility:public"],
 )
 '''
@@ -192,7 +192,7 @@ def _deb_translate_lock_impl(rctx):
                 control_targets = '"@%s//:control"' % repo_name,
                 src = '"@%s//:data"' % repo_name,
                 deps = starlark_codegen_utils.to_list_attr([
-                    "//%s/%s" % (dep["name"], package["arch"])
+                    "//%s/%s:data" % (dep["name"], package["arch"])
                     for dep in package["dependencies"]
                 ]),
                 urls = package["urls"],
