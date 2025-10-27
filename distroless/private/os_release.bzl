@@ -47,7 +47,7 @@ def os_release(
         "file",
         mode = mode,
         time = time,
-        content = "$(BINDIR)/$(rootpath :%s_content)" % name,
+        content = "$(execpath :%s_content)" % name,
     )
 
     tar(
