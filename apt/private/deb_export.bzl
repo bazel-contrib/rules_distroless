@@ -2,7 +2,7 @@
 
 TAR_TOOLCHAIN_TYPE = "@tar.bzl//tar/toolchain:type"
 
-def _apt_cursed_symlink(ctx):
+def _deb_export_impl(ctx):
     bsdtar = ctx.toolchains[TAR_TOOLCHAIN_TYPE]
 
     for (i, target) in ctx.attr.foreign_symlinks.items():
@@ -28,7 +28,10 @@ def _apt_cursed_symlink(ctx):
         )
         ctx.actions.run(
             executable = bsdtar.tarinfo.binary,
-            inputs = ctx.files.srcs,
+            # the archive may contain symlinks that point to symlinks that reference
+            # files from other packages, therefore symlink_outs must be present in the
+            # sandbox for Bazel to succesfully track them.
+            inputs = ctx.files.srcs + ctx.outputs.symlink_outs,
             outputs = ctx.outputs.outs,
             arguments = [args],
             mnemonic = "Unpack",
@@ -43,11 +46,10 @@ def _apt_cursed_symlink(ctx):
         ),
     )
 
-deb_cc_export = rule(
-    implementation = _apt_cursed_symlink,
+deb_export = rule(
+    implementation = _deb_export_impl,
     attrs = {
         "srcs": attr.label_list(allow_files = True),
-        "deps": attr.label_list(allow_files = True),
         # mapping of symlink_outs indice to a foreign label
         "foreign_symlinks": attr.string_keyed_label_dict(allow_files = True),
         "symlink_outs": attr.output_list(),
