@@ -7,7 +7,7 @@ load(":util.bzl", "util")
 # BUILD.bazel template
 _DEB_IMPORT_BUILD_TMPL = '''
 load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
-load("@rules_distroless//apt/private:deb_cc_export.bzl", "deb_cc_export")
+load("@rules_distroless//apt/private:deb_export.bzl", "deb_export")
 load("@rules_distroless//apt/private:apt_cursed_symlink.bzl", "apt_cursed_symlink")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
@@ -34,8 +34,8 @@ filegroup(
 )
 
 
-deb_cc_export(
-    name = "cc_export",
+deb_export(
+    name = "export",
     srcs = glob(["data.tar*"]),
     foreign_symlinks = {foreign_symlinks},
     symlink_outs = {symlink_outs},
