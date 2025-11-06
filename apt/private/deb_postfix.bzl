@@ -25,6 +25,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
 
     # If mergedusr, then rewrite paths to hoist bins/libs from / of the fs to /usr counterpart.
     # Be careful with this option as it assumes that /usr/ is mounted as one filesystem.
+    # This implementation does not merge /usr/sbin and /usr/bin as prescribed by debian
     # Read more:
     # https://wiki.gentoo.org/wiki/Merge-usr
     # https://salsa.debian.org/md/usrmerge/raw/master/debian/README.Debian
@@ -36,8 +37,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
         apply = """\
             $(BSDTAR_BIN) --confirmation --gzip -cf "$$layer" \
             -s "#^\\./bin/\\(.\\)#./usr/bin/\\1#" \
-            -s "#^\\./sbin/\\(.\\)#./usr/bin/\\1#" \
-            -s "#^\\./usr/sbin/\\(.\\)#./usr/bin/\\1#" \
+            -s "#^\\./sbin/\\(.\\)#./usr/sbin/\\1#" \
             -s "#^\\./lib/\\(.\\)#./usr/lib/\\1#" \
             -s "#^\\./lib32/\\(.\\)#./usr/lib32/\\1#" \
             -s "#^\\./lib64/\\(.\\)#./usr/lib64/\\1#" \
@@ -49,7 +49,6 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
                     if (substr($$1, 1, 1) == "d" && (\\
                             $$9 == "./bin/" ||\\
                             $$9 == "./sbin/" ||\\
-                            $$9 == "./usr/sbin/" ||\\
                             $$9 == "./lib/" ||\\
                             $$9 == "./lib32/" ||\\
                             $$9 == "./lib64/" ||\\
