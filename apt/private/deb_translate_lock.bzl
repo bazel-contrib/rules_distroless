@@ -69,6 +69,7 @@ _ARCHITECTURE_MAP = {{
     "s390x": "s390x",
     "i386": "x86_32",
     "armhf": "armv7e-mf",
+    "riscv64": "riscv64",
     "all": "all",
 }}
 
