@@ -34,7 +34,7 @@ def _distroless_extension(mctx):
     root_direct_dev_deps = []
     reproducible = False
 
-    # As in mach 9 :)
+    # as-in-mach 9
     glock = lockfile.merge(mctx, [
         lockfile.from_json(mctx, mctx.read(lock.into))
         for mod in mctx.modules
