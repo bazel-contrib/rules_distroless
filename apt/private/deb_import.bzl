@@ -8,7 +8,6 @@ load(":util.bzl", "util")
 _DEB_IMPORT_BUILD_TMPL = '''
 load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
 load("@rules_distroless//apt/private:deb_export.bzl", "deb_export")
-load("@rules_distroless//apt/private:apt_cursed_symlink.bzl", "apt_cursed_symlink")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
@@ -304,10 +303,11 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         shared_lib = None
 
         # Look for a static archive
-        for ar in a_files:
-            if ar.endswith(pkgc.libname + ".a"):
-                static_lib = '":%s"' % ar
-                break
+        # TODO: static linking is broken for now.
+        # for ar in a_files:
+        #     if ar.endswith(pkgc.libname + ".a"):
+        #         static_lib = '":%s"' % ar
+        #         break
 
         # Look for a dynamic library
         for so_lib in so_files:
