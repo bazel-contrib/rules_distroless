@@ -1,0 +1,33 @@
+bazel_dep(name = "rules_distroless", version = "0.0.0")
+local_path_override(
+    module_name = "rules_distroless",
+    path = "../..",
+)
+
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = [
+        "bookworm",
+        "bookworm-updates",
+    ],
+    uris = ["https://snapshot.debian.org/archive/debian/20251001T023456Z"],
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["bookworm-security"],
+    uris = ["https://snapshot.debian.org/archive/debian-security/20251001T023456Z"],
+)
+apt.install(
+    dependency_set = "bookworm",
+    packages = [
+        "libnl-3-dev",
+        "libnl-genl-3-dev",
+        "libnl-nf-3-dev",
+        "nlohmann-json3-dev",
+    ],
+    target_release = "bookworm",
+)
+use_repo(apt, "bookworm")
