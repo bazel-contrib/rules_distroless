@@ -131,7 +131,6 @@ cc_library(
 )
 """
 
-
 _CC_SHARED_LIB_TMPL = """
 cc_import(
     name = "{name}",
@@ -310,13 +309,12 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         rpath = so[:so.rfind("/")]
         rpaths[rpath] = None
 
-
     extra_so_deps = []
     for so_file in so_files:
         name = so_file.replace("/", "_S").lstrip()
         build_file_content += _CC_SHARED_LIB_TMPL.format(
             name = name,
-            lib = so_file
+            lib = so_file,
         )
         extra_so_deps.append(name)
 
