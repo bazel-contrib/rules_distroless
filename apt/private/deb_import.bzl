@@ -9,8 +9,11 @@ _DEB_IMPORT_BUILD_TMPL = '''
 load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
 load("@rules_distroless//apt/private:deb_export.bzl", "deb_export")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
+# load("@rules_cc//cc/private:cc_common.bzl", "cc_common")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
+
+# print(cc_common.solib_symlink_action)
 
 deb_postfix(
     name = "data",
@@ -56,6 +59,7 @@ cc_import(
     name = "{name}_imp_",
     hdrs = {hdrs},
     includes = {includes},
+    deps = {import_deps},
     shared_library = {shared_lib},
     static_library = {static_lib},
 )
@@ -74,6 +78,7 @@ cc_import(
     name = "{name}_import",
     hdrs = {hdrs},
     includes = {includes},
+    deps = {import_deps},
     shared_library = {shared_lib},
     static_library = {static_lib},
 )
@@ -126,11 +131,19 @@ cc_library(
 )
 """
 
+
+_CC_SHARED_LIB_TMPL = """
+cc_import(
+    name = "{name}",
+    shared_library = "{lib}",
+)
+"""
+
 _CC_LIBRARY_TMPL = """
 cc_library(
     name = "{name}_wodeps",
     hdrs = {hdrs},
-    srcs = {srcs},
+    deps = {import_deps},
     linkopts = {linkopts},
     additional_compiler_inputs = {additional_compiler_inputs},
     additional_linker_inputs = {additional_linker_inputs},
@@ -247,10 +260,12 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                     unresolved_symlinks.pop(symlink)
                     symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
 
+    # Resolve self symlinks
+    self_symlinks = {}
     for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
         for (symlink, symlink_target) in unresolved_symlinks.items():
             if file == symlink_target:
-                symlinks.pop(symlink)
+                self_symlinks[symlink] = symlinks.pop(symlink)
                 unresolved_symlinks.pop(symlink)
                 if len(unresolved_symlinks) == 0:
                     break
@@ -295,6 +310,16 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         rpath = so[:so.rfind("/")]
         rpaths[rpath] = None
 
+
+    extra_so_deps = []
+    for so_file in so_files:
+        name = so_file.replace("/", "_S").lstrip()
+        build_file_content += _CC_SHARED_LIB_TMPL.format(
+            name = name,
+            lib = so_file
+        )
+        extra_so_deps.append(name)
+
     # Package has a pkgconfig, use that as the source of truth.
     if len(r_pc_files) == 1:
         pkgc = pkgconfig(rctx, r_pc_files[0])
@@ -313,6 +338,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         for so_lib in so_files:
             if so_lib.endswith(pkgc.libname + ".so"):
                 shared_lib = '":%s"' % so_lib
+                print(shared_lib)
                 break
 
         build_file_content += _CC_IMPORT_SINGLE_TMPL.format(
@@ -333,6 +359,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
                 for lp in pkgc.link_paths
             ],
+            import_deps = extra_so_deps,
             deps = deps,
         )
     elif len(r_pc_files) > 1:
@@ -380,6 +407,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                     "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
                     for lp in pkgc.link_paths
                 ],
+                import_deps = [],
                 deps = deps,
             )
 
@@ -402,7 +430,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             name = target_name,
             hdrs = h_files + hpp_files,
             deps = deps,
-            srcs = [],
+            import_deps = extra_so_deps,
             additional_compiler_inputs = hpp_files_woext,
             additional_linker_inputs = so_files + a_files + o_files,
             linkopts = [
