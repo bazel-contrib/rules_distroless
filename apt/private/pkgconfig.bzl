@@ -92,13 +92,22 @@ def process_pcconfig(pc):
         "-llzma",
     ]
 
+    if directives["Name"] == "icu-uc":
+        print(pc)
+
     if "Libs" in directives:
         libs = _trim(directives["Libs"]).split(" ")
+
         for arg in libs:
             if arg in IGNORE:
                 continue
             if arg.startswith("-L"):
-                link_paths.append(arg.removeprefix("-L"))
+                linkpath = arg.removeprefix("-L")
+
+                # skip bare -L args
+                if not linkpath:
+                    continue
+                link_paths.append(linkpath)
                 linkopts.append("-Wl,-rpath=" + arg.removeprefix("-L"))
                 continue
             elif arg.startswith("-l") and not libname:
@@ -121,6 +130,10 @@ def process_pcconfig(pc):
         for flag in cflags:
             if flag.startswith("-I"):
                 include = flag.removeprefix("-I")
+
+                # skip bare -I arguments
+                if not include:
+                    continue
                 includes.append(include)
 
                 # If the include is direct include eg $includedir (/usr/include/hiredis)
@@ -133,6 +146,15 @@ def process_pcconfig(pc):
             elif flag.startswith("-D"):
                 define = flag.removeprefix("-D")
                 defines.append(define)
+
+    if len(includes) == 0:
+        includes = [
+            # Standard include path if the package does not specify includes
+            "/usr/include",
+        ]
+    if directives["Name"] == "icu-uc":
+        print(pc, libname)
+
     return (libname, includedir, libdir, linkopts, link_paths, includes, defines)
 
 def pkgconfig(rctx, path):
