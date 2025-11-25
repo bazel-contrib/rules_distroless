@@ -59,7 +59,6 @@ cc_import(
     name = "{name}_imp_",
     hdrs = {hdrs},
     includes = {includes},
-    deps = {import_deps},
     shared_library = {shared_lib},
     static_library = {static_lib},
 )
@@ -67,6 +66,7 @@ cc_import(
 cc_library(
     name = "{name}",
     deps = [":{name}_imp_"],
+    data = {additional_linker_inputs},
     additional_compiler_inputs = {additional_compiler_inputs},
     additional_linker_inputs = {additional_linker_inputs},
     linkopts = {linkopts},
@@ -78,7 +78,6 @@ cc_import(
     name = "{name}_import",
     hdrs = {hdrs},
     includes = {includes},
-    deps = {import_deps},
     shared_library = {shared_lib},
     static_library = {static_lib},
 )
@@ -86,6 +85,7 @@ cc_import(
 cc_library(
     name = "{name}_wodeps",
     deps = [":{name}_import"],
+    data = {additional_linker_inputs},
     additional_compiler_inputs = {additional_compiler_inputs},
     additional_linker_inputs = {additional_linker_inputs},
     linkopts = {linkopts},
@@ -142,7 +142,7 @@ _CC_LIBRARY_TMPL = """
 cc_library(
     name = "{name}_wodeps",
     hdrs = {hdrs},
-    deps = {import_deps},
+    data = {additional_linker_inputs},
     linkopts = {linkopts},
     additional_compiler_inputs = {additional_compiler_inputs},
     additional_linker_inputs = {additional_linker_inputs},
@@ -309,21 +309,20 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         rpath = so[:so.rfind("/")]
         rpaths[rpath] = None
 
-    extra_so_deps = []
-    for so_file in so_files:
-        name = so_file.replace("/", "_S").lstrip()
-        build_file_content += _CC_SHARED_LIB_TMPL.format(
-            name = name,
-            lib = so_file,
-        )
-        extra_so_deps.append(name)
-
     # Package has a pkgconfig, use that as the source of truth.
-    if len(r_pc_files) == 1:
-        pkgc = pkgconfig(rctx, r_pc_files[0])
+    if len(r_pc_files):
+        link_paths = []
+        includes = []
+        linkopts = []
 
         static_lib = None
         shared_lib = None
+
+        for pc_file in r_pc_files:
+            pkgc = pkgconfig(rctx, pc_file)
+            includes += pkgc.includes
+            linkopts = pkgc.linkopts
+            link_paths += pkgc.link_paths
 
         # Look for a static archive
         # TODO: static linking is broken for now.
@@ -333,87 +332,90 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         #         break
 
         # Look for a dynamic library
-        for so_lib in so_files:
-            if so_lib.endswith(pkgc.libname + ".so"):
-                shared_lib = '":%s"' % so_lib
-                print(shared_lib)
-                break
+        # for so_lib in so_files:
+        #     if so_lib.endswith(pkgc.libname + ".so"):
+        #         shared_lib = '":%s"' % so_lib
+        #         break
 
         build_file_content += _CC_IMPORT_SINGLE_TMPL.format(
             name = target_name,
             hdrs = h_files + hpp_files,
             additional_compiler_inputs = hpp_files_woext,
             additional_linker_inputs = so_files + o_files + a_files,
-            shared_lib = shared_lib,
+            shared_lib = '":%s"' % so_files[0],
             static_lib = static_lib,
-            includes = [
-                "external/.." + include
-                for include in pkgc.includes
-            ],
-            linkopts = pkgc.linkopts + [
+            includes = {
+                "external/.." + include: True
+                for include in includes
+            }.keys(),
+            linkopts = linkopts + [
                 "-Wl,-rpath=/" + rp
                 for rp in rpaths
             ] + [
+                # Needed for cc_test binaries to locate its dependencies.
+                "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
+                for rp in rpaths
+            ] + [
                 "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
-                for lp in pkgc.link_paths
+                for lp in link_paths
             ],
-            import_deps = extra_so_deps,
             deps = deps,
         )
-    elif len(r_pc_files) > 1:
-        targets = []
-        for pc_file in r_pc_files:
-            pkgc = pkgconfig(rctx, pc_file)
 
-            if not pkgc.libname or "_" + pkgc.libname in targets:
-                continue
+        # elif len(r_pc_files) > 1:
+        #     targets = []
+        #     for pc_file in r_pc_files:
+        #         pkgc = pkgconfig(rctx, pc_file)
 
-            subtarget = "_" + pkgc.libname
+        #         if not pkgc.libname or "_" + pkgc.libname in targets:
+        #             continue
 
-            targets.append(subtarget)
+        #         subtarget = "_" + pkgc.libname
 
-            static_lib = None
-            shared_lib = None
+        #         targets.append(subtarget)
 
-            # Look for a static archive
-            for ar in a_files:
-                if ar.endswith(pkgc.libname + ".a"):
-                    static_lib = '":%s"' % ar
-                    break
+        #         static_lib = None
+        #         shared_lib = None
 
-            # Look for a dynamic library
-            for so_lib in so_files:
-                if so_lib.endswith(pkgc.libname + ".so"):
-                    shared_lib = '":%s"' % so_lib
-                    break
+        #         # Look for a static archive
+        #         for ar in a_files:
+        #             if ar.endswith(pkgc.libname + ".a"):
+        #                 static_lib = '":%s"' % ar
+        #                 break
 
-            build_file_content += _CC_IMPORT_TMPL.format(
-                name = subtarget,
-                hdrs = h_files + hpp_files,
-                additional_compiler_inputs = hpp_files_woext,
-                additional_linker_inputs = so_files + o_files + a_files,
-                shared_lib = shared_lib,
-                static_lib = static_lib,
-                includes = [
-                    "external/.." + include
-                    for include in pkgc.includes
-                ],
-                linkopts = pkgc.linkopts + [
-                    "-Wl,-rpath=/" + rp
-                    for rp in rpaths
-                ] + [
-                    "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
-                    for lp in pkgc.link_paths
-                ],
-                import_deps = [],
-                deps = deps,
-            )
+        #         # Look for a dynamic library
+        #         for so_lib in so_files:
+        #             if so_lib.endswith(pkgc.libname + ".so"):
+        #                 shared_lib = '":%s"' % so_lib
+        #                 break
 
-        build_file_content += _CC_IMPORT_DENOMITATOR.format(
-            name = target_name,
-            targets = targets,
-            deps = deps,
-        )
+        #         build_file_content += _CC_IMPORT_TMPL.format(
+        #             name = subtarget,
+        #             hdrs = h_files + hpp_files,
+        #             additional_compiler_inputs = hpp_files_woext,
+        #             additional_linker_inputs = so_files + o_files + a_files,
+        #             shared_lib = shared_lib,
+        #             static_lib = static_lib,
+        #             includes = [
+        #                 "external/.." + include
+        #                 for include in pkgc.includes
+        #             ],
+        #             linkopts = pkgc.linkopts + [
+        #                 "-Wl,-rpath=/" + rp
+        #                 for rp in rpaths
+        #             ] + [
+        #                 "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
+        #                 for lp in pkgc.link_paths
+        #             ],
+        #             import_deps = [],
+        #             deps = deps,
+        #         )
+
+        #     build_file_content += _CC_IMPORT_DENOMITATOR.format(
+        #         name = target_name,
+        #         targets = targets,
+        #         deps = deps,
+        #     )
 
     elif (len(hpp_files) or len(h_files)) and ((target_name.find("libc") != -1 or target_name.find("libstdc") != -1 or target_name.find("libgcc") != -1)):
         build_file_content += _CC_LIBRARY_LIBC_TMPL.format(
@@ -428,7 +430,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             name = target_name,
             hdrs = h_files + hpp_files,
             deps = deps,
-            import_deps = extra_so_deps,
             additional_compiler_inputs = hpp_files_woext,
             additional_linker_inputs = so_files + a_files + o_files,
             linkopts = [
@@ -436,6 +437,9 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 for rpath in rpaths
             ] + [
                 "-Wl,-rpath=/" + rp
+                for rp in rpaths
+            ] + [
+                "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
                 for rp in rpaths
             ] + [
                 "-Wl,-rpath-link=$(BINDIR)/external/{}/{}".format(rctx.attr.name, rpath)
