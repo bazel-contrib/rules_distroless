@@ -6,8 +6,7 @@ load(":version_constraint.bzl", "version_constraint")
 def _resolve_package(state, name, version, arch):
     # First check if the constraint is satisfied by a virtual package
     virtual_packages = state.repository.virtual_packages(name = name, arch = arch)
-    if not len(virtual_packages):
-        virtual_packages = state.repository.virtual_packages(name = name, arch = "all")
+    virtual_packages.extend(state.repository.virtual_packages(name = name, arch = "all"))
 
     candidates = [
         package
