@@ -206,8 +206,6 @@ def _distroless_extension(mctx):
                 arch = arch,
             )
 
-        print(util.sanitize(package_key))
-
         deb_import(
             name = util.sanitize(package_key),
             target_name = util.sanitize(package_key),

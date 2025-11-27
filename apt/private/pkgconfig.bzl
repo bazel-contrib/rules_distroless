@@ -92,12 +92,8 @@ def process_pcconfig(pc):
         "-llzma",
     ]
 
-    if directives["Name"] == "icu-uc":
-        print(pc)
-
     if "Libs" in directives:
         libs = _trim(directives["Libs"]).split(" ")
-
         for arg in libs:
             if arg in IGNORE:
                 continue
@@ -152,8 +148,6 @@ def process_pcconfig(pc):
             # Standard include path if the package does not specify includes
             "/usr/include",
         ]
-    if directives["Name"] == "icu-uc":
-        print(pc, libname)
 
     return (libname, includedir, libdir, linkopts, link_paths, includes, defines)
 
