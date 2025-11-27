@@ -9,11 +9,8 @@ _DEB_IMPORT_BUILD_TMPL = '''
 load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
 load("@rules_distroless//apt/private:deb_export.bzl", "deb_export")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
-# load("@rules_cc//cc/private:cc_common.bzl", "cc_common")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
-
-# print(cc_common.solib_symlink_action)
 
 deb_postfix(
     name = "data",
@@ -56,20 +53,12 @@ directory(
 
 _CC_IMPORT_TMPL = """
 cc_import(
-    name = "{name}_imp_",
+    name = "{name}",
     hdrs = {hdrs},
     includes = {includes},
+    linkopts = {linkopts},
     shared_library = {shared_lib},
     static_library = {static_lib},
-)
-
-cc_library(
-    name = "{name}",
-    deps = [":{name}_imp_"],
-    data = {additional_linker_inputs},
-    additional_compiler_inputs = {additional_compiler_inputs},
-    additional_linker_inputs = {additional_linker_inputs},
-    linkopts = {linkopts},
 )
 """
 
@@ -143,10 +132,11 @@ cc_library(
     name = "{name}_wodeps",
     hdrs = {hdrs},
     data = {additional_linker_inputs},
+    deps = {direct_deps},
     linkopts = {linkopts},
     additional_compiler_inputs = {additional_compiler_inputs},
     additional_linker_inputs = {additional_linker_inputs},
-    strip_include_prefix = "{strip_include_prefix}",
+    strip_include_prefix = {strip_include_prefix},
     visibility = ["//visibility:public"],
 )
 
@@ -318,104 +308,67 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         static_lib = None
         shared_lib = None
 
+        import_targets = []
+
         for pc_file in r_pc_files:
             pkgc = pkgconfig(rctx, pc_file)
             includes += pkgc.includes
             linkopts = pkgc.linkopts
             link_paths += pkgc.link_paths
 
-        # Look for a static archive
-        # TODO: static linking is broken for now.
-        # for ar in a_files:
-        #     if ar.endswith(pkgc.libname + ".a"):
-        #         static_lib = '":%s"' % ar
-        #         break
+            if not pkgc.libname or pkgc.libname + "_import" in import_targets:
+                continue
 
-        # Look for a dynamic library
-        # for so_lib in so_files:
-        #     if so_lib.endswith(pkgc.libname + ".so"):
-        #         shared_lib = '":%s"' % so_lib
-        #         break
+            subtarget = pkgc.libname + "_import"
+            import_targets.append(subtarget)
 
-        build_file_content += _CC_IMPORT_SINGLE_TMPL.format(
+            # Look for a static archive
+            # for ar in a_files:
+            #     if ar.endswith(pkgc.libname + ".a"):
+            #         static_lib = '":%s"' % ar
+            #         break
+
+            # Look for a dynamic library
+            for so_lib in so_files:
+                if pkgc.libname and so_lib.endswith(pkgc.libname + ".so"):
+                    shared_lib = '":%s"' % so_lib
+                    break
+
+            build_file_content += _CC_IMPORT_TMPL.format(
+                name = subtarget,
+                shared_lib = shared_lib,
+                static_lib = static_lib,
+                hdrs = [],
+                includes = {
+                    "external/.." + include: True
+                    for include in includes + ["/usr/include", "/usr/include/x86_64-linux-gnu"]
+                }.keys(),
+                linkopts = pkgc.linkopts,
+            )
+
+        build_file_content += _CC_LIBRARY_TMPL.format(
             name = target_name,
             hdrs = h_files + hpp_files,
             additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + o_files + a_files,
-            shared_lib = '":%s"' % so_files[0],
-            static_lib = static_lib,
-            includes = {
-                "external/.." + include: True
-                for include in includes
+            additional_linker_inputs = so_files + o_files,
+            linkopts = {
+                opt: True
+                for opt in [
+                    # Needed for cc_test binaries to locate its dependencies.
+                    "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
+                    for rp in rpaths
+                ] + [
+                    "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
+                    for lp in link_paths
+                ] + [
+                    "-Wl,-rpath=/" + rp
+                    for rp in rpaths
+                ]
             }.keys(),
-            linkopts = linkopts + [
-                "-Wl,-rpath=/" + rp
-                for rp in rpaths
-            ] + [
-                # Needed for cc_test binaries to locate its dependencies.
-                "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
-                for rp in rpaths
-            ] + [
-                "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
-                for lp in link_paths
-            ],
+            direct_deps = import_targets,
             deps = deps,
+            strip_include_prefix = None,
         )
-
-        # elif len(r_pc_files) > 1:
-        #     targets = []
-        #     for pc_file in r_pc_files:
-        #         pkgc = pkgconfig(rctx, pc_file)
-
-        #         if not pkgc.libname or "_" + pkgc.libname in targets:
-        #             continue
-
-        #         subtarget = "_" + pkgc.libname
-
-        #         targets.append(subtarget)
-
-        #         static_lib = None
-        #         shared_lib = None
-
-        #         # Look for a static archive
-        #         for ar in a_files:
-        #             if ar.endswith(pkgc.libname + ".a"):
-        #                 static_lib = '":%s"' % ar
-        #                 break
-
-        #         # Look for a dynamic library
-        #         for so_lib in so_files:
-        #             if so_lib.endswith(pkgc.libname + ".so"):
-        #                 shared_lib = '":%s"' % so_lib
-        #                 break
-
-        #         build_file_content += _CC_IMPORT_TMPL.format(
-        #             name = subtarget,
-        #             hdrs = h_files + hpp_files,
-        #             additional_compiler_inputs = hpp_files_woext,
-        #             additional_linker_inputs = so_files + o_files + a_files,
-        #             shared_lib = shared_lib,
-        #             static_lib = static_lib,
-        #             includes = [
-        #                 "external/.." + include
-        #                 for include in pkgc.includes
-        #             ],
-        #             linkopts = pkgc.linkopts + [
-        #                 "-Wl,-rpath=/" + rp
-        #                 for rp in rpaths
-        #             ] + [
-        #                 "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
-        #                 for lp in pkgc.link_paths
-        #             ],
-        #             import_deps = [],
-        #             deps = deps,
-        #         )
-
-        #     build_file_content += _CC_IMPORT_DENOMITATOR.format(
-        #         name = target_name,
-        #         targets = targets,
-        #         deps = deps,
-        #     )
 
     elif (len(hpp_files) or len(h_files)) and ((target_name.find("libc") != -1 or target_name.find("libstdc") != -1 or target_name.find("libgcc") != -1)):
         build_file_content += _CC_LIBRARY_LIBC_TMPL.format(
@@ -426,26 +379,36 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             includes = [],
         )
     else:
+        extra_linkopts = []
+        if target_name == "libbsd0":
+            extra_linkopts = [
+                "-Wl,--remap-inputs=/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7=$(BINDIR)/external/{}/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7".format(rctx.attr.name),
+            ]
         build_file_content += _CC_LIBRARY_TMPL.format(
             name = target_name,
             hdrs = h_files + hpp_files,
             deps = deps,
             additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + a_files + o_files,
+            additional_linker_inputs = so_files + o_files,
             linkopts = [
-                "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, rpath)
-                for rpath in rpaths
-            ] + [
-                "-Wl,-rpath=/" + rp
+                # Required for linker to find .so libraries
+                "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
                 for rp in rpaths
             ] + [
-                "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
+                # Required for bazel test binary to find its dependencies.
+                "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rp)
                 for rp in rpaths
             ] + [
+                # Required for ld to validate rpath entries
                 "-Wl,-rpath-link=$(BINDIR)/external/{}/{}".format(rctx.attr.name, rpath)
                 for rp in rpaths
-            ],
-            strip_include_prefix = "usr/include",
+            ] + [
+                # Required for containers to find the dependencies at runtime.
+                "-Wl,-rpath=/" + rp
+                for rp in rpaths
+            ] + extra_linkopts,
+            strip_include_prefix = '"usr/include"',
+            direct_deps = [],
         )
 
     return (build_file_content, outs, symlinks)
