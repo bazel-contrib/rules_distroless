@@ -8,6 +8,7 @@ load(":util.bzl", "util")
 _DEB_IMPORT_BUILD_TMPL = '''
 load("@rules_distroless//apt/private:deb_postfix.bzl", "deb_postfix")
 load("@rules_distroless//apt/private:deb_export.bzl", "deb_export")
+load("@rules_distroless//apt/private:so_library.bzl", "so_library")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
@@ -51,58 +52,6 @@ directory(
 {cc_import_targets}
 '''
 
-_CC_IMPORT_TMPL = """
-cc_import(
-    name = "{name}",
-    hdrs = {hdrs},
-    includes = {includes},
-    linkopts = {linkopts},
-    shared_library = {shared_lib},
-    static_library = {static_lib},
-)
-"""
-
-_CC_IMPORT_SINGLE_TMPL = """
-cc_import(
-    name = "{name}_import",
-    hdrs = {hdrs},
-    includes = {includes},
-    shared_library = {shared_lib},
-    static_library = {static_lib},
-)
-
-cc_library(
-    name = "{name}_wodeps",
-    deps = [":{name}_import"],
-    data = {additional_linker_inputs},
-    additional_compiler_inputs = {additional_compiler_inputs},
-    additional_linker_inputs = {additional_linker_inputs},
-    linkopts = {linkopts},
-    visibility = ["//visibility:public"],
-)
-
-
-cc_library(
-    name = "{name}",
-    deps = [":{name}_wodeps"] + {deps},
-    visibility = ["//visibility:public"],
-)
-"""
-
-_CC_IMPORT_DENOMITATOR = """
-cc_library(
-    name = "{name}_wodeps",
-    deps = {targets},
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "{name}",
-    deps = [":{name}_wodeps"] + {deps},
-    visibility = ["//visibility:public"],
-)
-"""
-
 _CC_LIBRARY_LIBC_TMPL = """
 alias(
     name = "{name}_wodeps",
@@ -120,10 +69,14 @@ cc_library(
 )
 """
 
-_CC_SHARED_LIB_TMPL = """
+_CC_IMPORT_TMPL = """
 cc_import(
     name = "{name}",
-    shared_library = "{lib}",
+    hdrs = {hdrs},
+    includes = {includes},
+    linkopts = {linkopts},
+    shared_library = {shared_lib},
+    static_library = {static_lib},
 )
 """
 
@@ -131,7 +84,6 @@ _CC_LIBRARY_TMPL = """
 cc_library(
     name = "{name}_wodeps",
     hdrs = {hdrs},
-    data = {additional_linker_inputs},
     deps = {direct_deps},
     linkopts = {linkopts},
     additional_compiler_inputs = {additional_compiler_inputs},
@@ -239,7 +191,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     # TODO: this is highly inefficient, change the filemapping to be
     # file -> package instead of package -> files
     for dep in depends_on:
-        (suite, name, arch, version) = lockfile.parse_package_key(dep)
+        (suite, name, arch, _) = lockfile.parse_package_key(dep)
         filemap = depends_file_map.get(name, []) or []
         for file in filemap:
             if len(unresolved_symlinks) == 0:
@@ -282,7 +234,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             "@%s//:%s_wodeps" % (util.sanitize(dep), name.removesuffix("-dev")),
         )
 
-    r_pc_files = []
+    pkgconfigs = []
     if len(pc_files):
         # TODO: use rctx.extract instead.
         rctx.execute(
@@ -290,9 +242,14 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         )
         for pc in pc_files:
             if rctx.path(pc).exists:
-                r_pc_files.append(pc)
+                pkgconfigs.append(pc)
 
-    build_file_content = ""
+    build_file_content = """
+so_library(
+    name = "_so_libs",
+    dynamic_libs = {}
+)
+""".format(so_files)
 
     rpaths = {}
     for so in so_files + a_files:
@@ -300,20 +257,18 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         rpaths[rpath] = None
 
     # Package has a pkgconfig, use that as the source of truth.
-    if len(r_pc_files):
+    if len(pkgconfigs):
         link_paths = []
         includes = []
-        linkopts = []
 
         static_lib = None
         shared_lib = None
 
         import_targets = []
 
-        for pc_file in r_pc_files:
+        for pc_file in pkgconfigs:
             pkgc = pkgconfig(rctx, pc_file)
             includes += pkgc.includes
-            linkopts = pkgc.linkopts
             link_paths += pkgc.link_paths
 
             if not pkgc.libname or pkgc.libname + "_import" in import_targets:
@@ -329,8 +284,9 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             #         break
 
             # Look for a dynamic library
+            IGNORE = ["libfl"]
             for so_lib in so_files:
-                if pkgc.libname and so_lib.endswith(pkgc.libname + ".so"):
+                if pkgc.libname and pkgc.libname not in IGNORE and so_lib.endswith(pkgc.libname + ".so"):
                     shared_lib = '":%s"' % so_lib
                     break
 
@@ -354,9 +310,13 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             linkopts = {
                 opt: True
                 for opt in [
-                    # Needed for cc_test binaries to locate its dependencies.
-                    "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
-                    for rp in rpaths
+                    # # Needed for cc_test binaries to locate its dependencies.
+                    # "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
+                    # for rp in rpaths
+                ] + [
+                    # Needed for cc_test binaries to locate its dependencies as a build tool
+                    # "-Wl,-rpath=./external/{}/{}".format(rctx.attr.name, rpath)
+                    # for rp in rpaths
                 ] + [
                     "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
                     for lp in link_paths
@@ -365,7 +325,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                     for rp in rpaths
                 ]
             }.keys(),
-            direct_deps = import_targets,
+            direct_deps = import_targets + [":_so_libs"],
             deps = deps,
             strip_include_prefix = None,
         )
@@ -395,12 +355,12 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
                 for rp in rpaths
             ] + [
-                # Required for bazel test binary to find its dependencies.
-                "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rp)
-                for rp in rpaths
+                # # Required for bazel test binary to find its dependencies.
+                # "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rp)
+                # for rp in rpaths
             ] + [
                 # Required for ld to validate rpath entries
-                "-Wl,-rpath-link=$(BINDIR)/external/{}/{}".format(rctx.attr.name, rpath)
+                "-Wl,-rpath-link=$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
                 for rp in rpaths
             ] + [
                 # Required for containers to find the dependencies at runtime.
@@ -408,7 +368,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 for rp in rpaths
             ] + extra_linkopts,
             strip_include_prefix = '"usr/include"',
-            direct_deps = [],
+            direct_deps = [":_so_libs"],
         )
 
     return (build_file_content, outs, symlinks)

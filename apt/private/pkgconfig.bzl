@@ -90,13 +90,12 @@ def process_pcconfig(pc):
         "-licudata",
         "-lz",
         "-llzma",
+        "-lfl",
     ]
 
     if "Libs" in directives:
         libs = _trim(directives["Libs"]).split(" ")
         for arg in libs:
-            if arg in IGNORE:
-                continue
             if arg.startswith("-L"):
                 linkpath = arg.removeprefix("-L")
 
@@ -109,7 +108,7 @@ def process_pcconfig(pc):
             elif arg.startswith("-l") and not libname:
                 libname = "lib" + arg.removeprefix("-l")
                 continue
-            if arg == "-licudata":
+            elif arg in IGNORE:
                 continue
             linkopts.append(arg)
 
@@ -118,7 +117,7 @@ def process_pcconfig(pc):
         for arg in libs:
             if arg in IGNORE:
                 continue
-            if arg.startswith("-l"):
+            elif arg.startswith("-l"):
                 linkopts.append(arg)
 
     if "Cflags" in directives:
