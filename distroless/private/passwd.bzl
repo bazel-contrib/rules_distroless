@@ -56,7 +56,7 @@ def passwd(name, entries, mode = "0644", time = "0.0", **kwargs):
         "file",
         mode = mode,
         time = time,
-        content = "$(BINDIR)/$(rootpath :%s_content)" % name,
+        content = "$(execpath :%s_content)" % name,
     )
 
     tar(
