@@ -394,7 +394,7 @@ def _deb_import_impl(rctx):
         cc_import_targets = cc_import_targets,
         outs = outs,
         foreign_symlinks = {
-            str(i): symlink
+            symlink: str(i)
             for (i, symlink) in enumerate(symlinks.values())
         },
         symlink_outs = symlinks.keys(),

@@ -259,7 +259,7 @@ apt.sources_list(
 apt.install(
     # dependency set isolates these installs into their own scope.
     dependency_set = "noble",
-    target_release = "noble",
+    suites = ["noble", "noble-security", "noble-updates"],
     packages = [
         "ncurses-base",
         "libncurses6",
@@ -342,7 +342,7 @@ install = tag_class(
             allow_empty = False,
         ),
         "dependency_set": attr.string(),
-        "target_release": attr.string(mandatory = True),
+        "suites": attr.string_list(),
         "include_transitive": attr.bool(default = True),
     },
 )

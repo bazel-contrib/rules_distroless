@@ -133,7 +133,7 @@ def _resolve_optionals_test(ctx):
     idx.add_package(package = "libc6-dev")
     idx.add_package(package = "eject", depends = "libc6-dev | libc-dev")
 
-    (root_package, dependencies, _) = idx.resolution.resolve_all(
+    (root_package, dependencies, _, _) = idx.resolution.resolve_all(
         name = "eject",
         version = ("=", _test_version),
         arch = _test_arch,
@@ -157,7 +157,7 @@ def _resolve_architecture_specific_packages_test(ctx):
     idx.add_package(package = "glibc", architecture = "all", depends = "foo [i386], bar [amd64]")
 
     # bar for amd64
-    (root_package, dependencies, _) = idx.resolution.resolve_all(
+    (root_package, dependencies, _, _) = idx.resolution.resolve_all(
         name = "glibc",
         version = ("=", _test_version),
         arch = "amd64",
@@ -168,7 +168,7 @@ def _resolve_architecture_specific_packages_test(ctx):
     asserts.equals(env, 1, len(dependencies))
 
     # foo for i386
-    (root_package, dependencies, _) = idx.resolution.resolve_all(
+    (root_package, dependencies, _, _) = idx.resolution.resolve_all(
         name = "glibc",
         version = ("=", _test_version),
         arch = "i386",
@@ -197,7 +197,7 @@ def _resolve_aliases(ctx):
         for package in with_packages:
             package(idx)
 
-        (root_package, dependencies, _) = idx.resolution.resolve_all(
+        (root_package, dependencies, _, _) = idx.resolution.resolve_all(
             name = "foo",
             version = ("=", _test_version),
             arch = "amd64",
@@ -244,12 +244,12 @@ def _resolve_aliases(ctx):
         with_package(package = "bar-plus", provides = "bar (= 1.0)"),
     ], resolved_name = "bar-plus")
 
-    # Un-versioned does not match with multiple candidates
+    # Un-versioned with multiple candidates - picks the latest version
     check_resolves([
         with_package(package = "foo", depends = "bar"),
         with_package(package = "bar-plus", provides = "bar"),
         with_package(package = "bar-plus2", provides = "bar"),
-    ], resolved_name = None)
+    ], resolved_name = "bar-plus2")
 
     return unittest.end(env)
 
@@ -266,7 +266,7 @@ def _resolve_circular_deps_test(ctx):
     idx.add_package(package = "ruby-rubygems", depends = "ruby3.1")
     idx.add_package(package = "ruby", depends = "libruby, ruby-rubygems")
 
-    (root_package, dependencies, _) = idx.resolution.resolve_all(
+    (root_package, dependencies, _, _) = idx.resolution.resolve_all(
         name = "ruby",
         version = "",
         arch = _test_arch,
