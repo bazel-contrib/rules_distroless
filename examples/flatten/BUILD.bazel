@@ -1,6 +1,6 @@
 load("@aspect_bazel_lib//lib:tar.bzl", "tar")
-load("//distroless:defs.bzl", "flatten", "home", "passwd")
-load("//distroless/tests:asserts.bzl", "assert_tar_listing", "assert_tar_mtree")
+load("@rules_distroless//distroless:defs.bzl", "flatten", "home", "passwd")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_tar_listing", "assert_tar_mtree")
 
 passwd(
     name = "passwd",
@@ -54,12 +54,11 @@ assert_tar_mtree(
 #mtree
 ./etc time=0.0 mode=755 gid=0 uid=0 type=dir
 ./etc/passwd time=0.0 mode=644 gid=0 uid=0 type=file size=34
-./examples time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten/dir time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten/dir/changelog time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
-./examples/flatten/dir/sub time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten/dir/sub/content.txt time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
+./flatten time=1672560000.0 mode=755 gid=0 uid=0 type=dir
+./flatten/dir time=1672560000.0 mode=755 gid=0 uid=0 type=dir
+./flatten/dir/changelog time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
+./flatten/dir/sub time=1672560000.0 mode=755 gid=0 uid=0 type=dir
+./flatten/dir/sub/content.txt time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
 ./home/nonroot time=0.0 mode=700 gid=666 uid=666 type=dir
 ./root time=0.0 mode=700 gid=0 uid=0 type=dir
 """,
@@ -99,12 +98,11 @@ assert_tar_mtree(
     actual = "flatten_dedup",
     expected = """\
 #mtree
-./examples time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten/dir time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten/dir/changelog time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
-./examples/flatten/dir/sub time=1672560000.0 mode=755 gid=0 uid=0 type=dir
-./examples/flatten/dir/sub/content.txt time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
+./flatten time=1672560000.0 mode=755 gid=0 uid=0 type=dir
+./flatten/dir time=1672560000.0 mode=755 gid=0 uid=0 type=dir
+./flatten/dir/changelog time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
+./flatten/dir/sub time=1672560000.0 mode=755 gid=0 uid=0 type=dir
+./flatten/dir/sub/content.txt time=1672560000.0 mode=755 gid=0 uid=0 type=file size=0
 """,
 )
 
@@ -112,11 +110,10 @@ assert_tar_listing(
     name = "test_flatten_dedup_listing",
     actual = "flatten_dedup",
     expected = """\
-examples/
-examples/flatten/
-examples/flatten/dir/
-examples/flatten/dir/changelog
-examples/flatten/dir/sub/
-examples/flatten/dir/sub/content.txt
+flatten/
+flatten/dir/
+flatten/dir/changelog
+flatten/dir/sub/
+flatten/dir/sub/content.txt
 """,
 )

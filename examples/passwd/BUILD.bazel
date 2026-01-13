@@ -1,6 +1,6 @@
 load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
-load("//distroless:defs.bzl", "passwd")
-load("//distroless/tests:asserts.bzl", "assert_tar_mtree")
+load("@rules_distroless//distroless:defs.bzl", "passwd")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_tar_mtree")
 
 passwd(
     name = "passwd",

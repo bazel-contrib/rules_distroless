@@ -1,11 +1,8 @@
 """
-NOTE:
+Debian Bullseye example using the new bzlmod API.
 
-        This is the main test used in the e2e testing.
-
-  PLEASE KEEP e2e/smoke/BUILD and examples/debian_snapshot/BUILD
-  IN-SYNC WITH EACH OTHER, AS WELL AS THE REST OF THE TEST FILES
-    (test_linux_<ARCH> files and the bullseye YAML manifest)
+This example demonstrates how to create a distroless container image
+using packages from Debian Bullseye snapshot.
 """
 
 load("@aspect_bazel_lib//lib:tar.bzl", "tar")
@@ -80,9 +77,6 @@ oci_image(
         "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
     },
     os = "linux",
-    # NOTE: this is needed because, otherwise, bazel test //... fails, even
-    # when container_structure_test already has target_compatible_with.
-    # See 136
     target_compatible_with = COMPATIBLE_WITH,
     tars = [
         # This target contains all the installed packages.
@@ -125,9 +119,6 @@ oci_load(
     repo_tags = [
         "distroless/test:latest",
     ],
-    # NOTE: this is needed because, otherwise, bazel test //... fails, even
-    # when container_structure_test already has target_compatible_with.
-    # See 136
     target_compatible_with = COMPATIBLE_WITH,
 )
 
