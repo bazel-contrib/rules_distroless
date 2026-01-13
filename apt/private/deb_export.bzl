@@ -1,11 +1,14 @@
 "normalization rules"
 
-TAR_TOOLCHAIN_TYPE = "@tar.bzl//tar/toolchain:type"
+load("@aspect_bazel_lib//lib:tar.bzl", tar = "tar_lib")
+
+TAR_TOOLCHAIN_TYPE = tar.toolchain_type
 
 def _deb_export_impl(ctx):
     bsdtar = ctx.toolchains[TAR_TOOLCHAIN_TYPE]
 
-    for (i, target) in ctx.attr.foreign_symlinks.items():
+    # foreign_symlinks maps label -> index string (reversed for Bazel 7.0.0 compatibility)
+    for (target, i) in ctx.attr.foreign_symlinks.items():
         i = int(i)
         ctx.actions.symlink(
             output = ctx.outputs.symlink_outs[i],
@@ -50,8 +53,8 @@ deb_export = rule(
     implementation = _deb_export_impl,
     attrs = {
         "srcs": attr.label_list(allow_files = True),
-        # mapping of symlink_outs indice to a foreign label
-        "foreign_symlinks": attr.string_keyed_label_dict(allow_files = True),
+        # mapping of foreign label -> symlink_outs index (label_keyed for Bazel 7.0 compat)
+        "foreign_symlinks": attr.label_keyed_string_dict(allow_files = True),
         "symlink_outs": attr.output_list(),
         "outs": attr.output_list(),
     },

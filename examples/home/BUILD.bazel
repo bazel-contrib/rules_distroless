@@ -1,5 +1,5 @@
-load("//distroless:defs.bzl", "home")
-load("//distroless/tests:asserts.bzl", "assert_tar_mtree")
+load("@rules_distroless//distroless:defs.bzl", "home")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_tar_mtree")
 
 home(
     name = "home",

@@ -336,7 +336,7 @@ def _create_test_only():
         package_versions = lambda **kwargs: _package_versions(state, **kwargs),
         virtual_packages = lambda **kwargs: _virtual_packages(state, **kwargs),
         package = lambda **kwargs: _package(state, **kwargs),
-        parse_repository = lambda contents: _parse_repository(state, contents, "http://nowhere"),
+        parse_repository = lambda contents: _parse_repository(state, contents, "http://nowhere", "test"),
         packages = state.packages,
         reset = reset,
     )
