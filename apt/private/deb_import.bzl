@@ -183,25 +183,20 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             continue
 
         if resolved_symlink:
-            print("BL: _discover_contents::resolved_symlink(line={}, sl={})".format(line, resolved_symlink))
             symlinks[line] = resolved_symlink
 
     # Resolve symlinks:
     unresolved_symlinks = {} | symlinks
-
-    print("BL: _discover_contents::depends_file_map({})".format(depends_file_map))
 
     # TODO: this is highly inefficient, change the filemapping to be
     # file -> package instead of package -> files
     for dep in depends_on:
         (suite, name, arch, _) = lockfile.parse_package_key(dep)
         filemap = depends_file_map.get(name, []) or []
-        print("BL: _discover_contents::for_dep(dep={}, filemap={})".format(name, filemap))
         for file in filemap:
             if len(unresolved_symlinks) == 0:
                 break
             for (symlink, symlink_target) in unresolved_symlinks.items():
-                print("BL: _discover_contents::depends_on::symlink(symlink={}, symlink_target={})".format(symlink, symlink_target))
                 if file == symlink_target:
                     unresolved_symlinks.pop(symlink)
                     symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
@@ -216,8 +211,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 unresolved_symlinks.pop(symlink)
                 if len(unresolved_symlinks) == 0:
                     break
-
-    print("BL: _discover_contents::depends_on::after(\nsymlinks={}\nself_symlinks={}\nunresolved_symlinks={}\n)".format(symlinks, self_symlinks, unresolved_symlinks))
 
     if len(unresolved_symlinks):
         util.warning(
@@ -394,8 +387,6 @@ def _deb_import_impl(rctx):
         json.decode(rctx.attr.depends_file_map),
         rctx.attr.package_name.removesuffix("-dev"),
     )
-
-    print("BL: symlinks for {} = {}".format(rctx.attr.target_name, symlinks))
 
     foreign_symlinks = {}
     for (i, symlink) in enumerate(symlinks.values()):
