@@ -91,6 +91,7 @@ def _distroless_extension(mctx):
                         name = constraint["name"],
                         version = constraint["version"],
                         arch = "amd64",
+                        suites = install.suites,
                     )
                     if warning:
                         util.warning(mctx, warning)
@@ -104,6 +105,7 @@ def _distroless_extension(mctx):
                             constraint["name"],
                             constraint["version"],
                             "amd64",
+                            install.suites,
                         ))
                         continue
 
@@ -116,6 +118,7 @@ def _distroless_extension(mctx):
                         constraint["name"],
                         constraint["version"],
                         arch,
+                        install.suites,
                     ))
 
     for i in range(0, ITERATION_MAX + 1):
@@ -124,24 +127,27 @@ def _distroless_extension(mctx):
         if i == ITERATION_MAX:
             fail("apt.install exhausted, please file a bug")
 
-        (dependency_set_name, name, version, arch) = resolution_queue.pop()
+        (dependency_set_name, name, version, arch, suites) = resolution_queue.pop()
 
-        mctx.report_progress("Resolving %s:%s" % (dep_constraint, arch))
+        mctx.report_progress("Resolving %s:%s" % (name, arch))
 
         # TODO: Flattening approach of resolving dependencies has to change.
         (package, dependencies, unmet_dependencies, warnings) = resolver.resolve_all(
             name = name,
             version = version,
             arch = arch,
-            include_transitive = install.include_transitive,
+            include_transitive = True,
+            suites = suites,
         )
 
         if not package:
+            suite_msg = " in suite(s) [%s]" % ", ".join(suites) if suites else ""
             fail(
-                "\n\nUnable to locate package `%s` for %s. It may only exist for specific set of architectures. \n" % (name, arch) +
+                "\n\nUnable to locate package `%s` for %s%s. It may only exist for specific set of architectures or suites. \n" % (name, arch, suite_msg) +
                 "   1 - Ensure that the package is available for the specified architecture. \n" +
                 "   2 - Ensure that the specified version of the package is available for the specified architecture. \n" +
-                "   3 - Ensure that an apt.source_list added for the specified architecture.",
+                "   3 - Ensure that an apt.sources_list is added for the specified architecture.\n" +
+                "   4 - If using suite constraints, ensure the package exists in the specified suite(s).",
             )
 
         for warning in warnings:
@@ -176,6 +182,7 @@ def _distroless_extension(mctx):
                     dep["Package"],
                     ("=", dep["Version"]),
                     arch,
+                    suites,
                 ))
             glock.add_package_dependency(package, dep)
 
