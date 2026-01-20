@@ -228,14 +228,27 @@ def _add_package(state, package):
                 (package["Architecture"], virtual["name"]),
             )
 
-def _virtual_packages(state, name, arch):
-    return util.get_dict(state.virtual_packages, [arch, name], [])
+def _virtual_packages(state, name, arch, suites = None):
+    all_providers = util.get_dict(state.virtual_packages, [arch, name], [])
+    if not suites:
+        return all_providers
+    return [(pkg, v) for (pkg, v) in all_providers if pkg["Dist"] in suites]
 
-def _package_versions(state, name, arch):
-    return util.get_dict(state.packages, [arch, name], {}).keys()
+def _package_versions(state, name, arch, suites = None):
+    all_packages = util.get_dict(state.packages, [arch, name], {})
+    if not suites:
+        return all_packages.keys()
+    return [v for v, pkg in all_packages.items() if pkg["Dist"] in suites]
 
-def _package(state, name, version, arch):
-    return util.get_dict(state.packages, keys = (arch, name, version))
+def _package(state, name, version, arch, suites = None):
+    if not version:
+        return None
+    package = util.get_dict(state.packages, keys = (arch, name, version))
+    if not package:
+        return None
+    if suites and package["Dist"] not in suites:
+        return None
+    return package
 
 def _filemap(state, name, arch):
     if arch not in state.filemap:
@@ -336,7 +349,7 @@ def _create_test_only():
         package_versions = lambda **kwargs: _package_versions(state, **kwargs),
         virtual_packages = lambda **kwargs: _virtual_packages(state, **kwargs),
         package = lambda **kwargs: _package(state, **kwargs),
-        parse_repository = lambda contents: _parse_repository(state, contents, "http://nowhere", "test"),
+        parse_repository = lambda contents, dist = "test": _parse_repository(state, contents, "http://nowhere", dist),
         packages = state.packages,
         reset = reset,
     )

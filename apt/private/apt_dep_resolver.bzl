@@ -3,9 +3,9 @@
 load(":version.bzl", version_lib = "version")
 load(":version_constraint.bzl", "version_constraint")
 
-def _resolve_package(state, name, version, arch):
+def _resolve_package(state, name, version, arch, suites = None):
     # First check if the constraint is satisfied by a virtual package
-    virtual_packages = state.repository.virtual_packages(name = name, arch = arch)
+    virtual_packages = state.repository.virtual_packages(name = name, arch = arch, suites = suites)
 
     candidates = [
         package
@@ -52,8 +52,8 @@ def _resolve_package(state, name, version, arch):
         # )
 
     # Get available versions of the package
-    versions_by_arch = state.repository.package_versions(name = name, arch = arch)
-    versions_by_any_arch = state.repository.package_versions(name = name, arch = "all")
+    versions_by_arch = state.repository.package_versions(name = name, arch = arch, suites = suites)
+    versions_by_any_arch = state.repository.package_versions(name = name, arch = "all", suites = suites)
 
     # Order packages by highest to lowest
     versions = version_lib.sort(versions_by_arch + versions_by_any_arch, reverse = True)
@@ -73,9 +73,9 @@ def _resolve_package(state, name, version, arch):
         # First element in the versions list is the latest version.
         selected_version = versions[0]
 
-    package = state.repository.package(name = name, version = selected_version, arch = arch)
+    package = state.repository.package(name = name, version = selected_version, arch = arch, suites = suites)
     if not package:
-        package = state.repository.package(name = name, version = selected_version, arch = "all")
+        package = state.repository.package(name = name, version = selected_version, arch = "all", suites = suites)
 
     return (package, warning)
 
@@ -84,7 +84,7 @@ _ITERATION_MAX_ = 2147483646
 # For future: unfortunately this function uses a few state variables to track
 # certain conditions and package dependency groups.
 # TODO: Try to simplify it in the future.
-def _resolve_all(state, name, version, arch, include_transitive = True):
+def _resolve_all(state, name, version, arch, include_transitive = True, suites = None):
     unmet_dependencies = []
     root_package = None
     dependencies = []
@@ -112,8 +112,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
 
         path.append(name)
 
-        # TODO: only resolve in specified suites
-        (package, warning) = _resolve_package(state, name, version, arch)
+        (package, warning) = _resolve_package(state, name, version, arch, suites = suites)
         if warning:
             warnings.append(warning)
 
