@@ -9,11 +9,11 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
             mv "$$data_file" "$$layer"
         ;;
         *data.tar)
-            $(ZSTD_BIN) --compress --format=gzip "$$data_file" > "$$layer"
+            (exec -a gzip $(ZSTD_BIN) -n) < "$$data_file" > "$$layer"
         ;;
         *data.tar.xz|*data.tar.zst|*data.tar.lzma)
             $(ZSTD_BIN) --force --decompress --stdout "$$data_file" |
-            $(ZSTD_BIN) --compress --format=gzip - > "$$layer"
+            (exec -a gzip $(ZSTD_BIN) -n) > "$$layer"
         ;;
         *)
             echo "ERROR: data file not supported: $$data_file"
@@ -35,7 +35,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     if mergedusr:
         toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"]
         apply = """\
-            $(BSDTAR_BIN) --confirmation --gzip -cf "$$layer" \
+            $(BSDTAR_BIN) --confirmation --gzip --options 'gzip:!timestamp' -cf "$$layer" \
             -s "#^\\./bin/\\(.\\)#./usr/bin/\\1#" \
             -s "#^\\./sbin/\\(.\\)#./usr/sbin/\\1#" \
             -s "#^\\./lib/\\(.\\)#./usr/lib/\\1#" \
