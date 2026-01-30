@@ -118,7 +118,9 @@ def process_pcconfig(pc):
             if arg in IGNORE:
                 continue
             elif arg.startswith("-l"):
-                linkopts.append(arg)
+                # The cc_imports we create based on these names are private already,
+                # so we don't need to do anything special for `Libs.private`.
+                libnames.append("lib" + arg.removeprefix("-l"))
 
     if "Cflags" in directives:
         cflags = _trim(directives["Cflags"]).split(" ")
