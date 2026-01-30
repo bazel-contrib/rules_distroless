@@ -272,36 +272,40 @@ so_library(
             includes += pkgc.includes
             link_paths += pkgc.link_paths
 
-            if not pkgc.libname or pkgc.libname + "_import" in import_targets:
+            if len(pkgc.libnames) == 0:
                 continue
 
-            subtarget = pkgc.libname + "_import"
-            import_targets.append(subtarget)
+            for libname in pkgc.libnames:
+              if libname + "_import" in import_targets:
+                continue
 
-            # Look for a static archive
-            # for ar in a_files:
-            #     if ar.endswith(pkgc.libname + ".a"):
-            #         static_lib = '":%s"' % ar
-            #         break
+              subtarget = libname + "_import"
+              import_targets.append(subtarget)
 
-            # Look for a dynamic library
-            IGNORE = ["libfl"]
-            for so_lib in so_files:
-                if pkgc.libname and pkgc.libname not in IGNORE and so_lib.endswith(pkgc.libname + ".so"):
-                    shared_lib = '":%s"' % so_lib
-                    break
+              # Look for a static archive
+              # for ar in a_files:
+              #     if ar.endswith(pkgc.libname + ".a"):
+              #         static_lib = '":%s"' % ar
+              #         break
 
-            build_file_content += _CC_IMPORT_TMPL.format(
-                name = subtarget,
-                shared_lib = shared_lib,
-                static_lib = static_lib,
-                hdrs = [],
-                includes = {
-                    "external/.." + include: True
-                    for include in includes + ["/usr/include", "/usr/include/x86_64-linux-gnu"]
-                }.keys(),
-                linkopts = pkgc.linkopts,
-            )
+              # Look for a dynamic library
+              IGNORE = ["libfl"]
+              for so_lib in so_files:
+                  if libname and libname not in IGNORE and so_lib.endswith(libname + ".so"):
+                      shared_lib = '":%s"' % so_lib
+                      break
+
+              build_file_content += _CC_IMPORT_TMPL.format(
+                  name = subtarget,
+                  shared_lib = shared_lib,
+                  static_lib = static_lib,
+                  hdrs = [],
+                  includes = {
+                      "external/.." + include: True
+                      for include in includes + ["/usr/include", "/usr/include/x86_64-linux-gnu"]
+                  }.keys(),
+                  linkopts = pkgc.linkopts,
+              )
 
         build_file_content += _CC_LIBRARY_TMPL.format(
             name = target_name,
