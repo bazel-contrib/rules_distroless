@@ -82,7 +82,7 @@ def process_pcconfig(pc):
     includes = []
     link_paths = []
     defines = []
-    libname = None
+    libnames = []
 
     IGNORE = [
         "-licui18n",
@@ -105,8 +105,8 @@ def process_pcconfig(pc):
                 link_paths.append(linkpath)
                 linkopts.append("-Wl,-rpath=" + arg.removeprefix("-L"))
                 continue
-            elif arg.startswith("-l") and not libname:
-                libname = "lib" + arg.removeprefix("-l")
+            elif arg.startswith("-l"):
+                libnames.append("lib" + arg.removeprefix("-l"))
                 continue
             elif arg in IGNORE:
                 continue
@@ -148,14 +148,14 @@ def process_pcconfig(pc):
             "/usr/include",
         ]
 
-    return (libname, includedir, libdir, linkopts, link_paths, includes, defines)
+    return (libnames, includedir, libdir, linkopts, link_paths, includes, defines)
 
 def pkgconfig(rctx, path):
     pc = parse_pc(rctx.read(path))
-    (libname, includedir, libdir, linkopts, link_paths, includes, defines) = process_pcconfig(pc)
+    (libnames, includedir, libdir, linkopts, link_paths, includes, defines) = process_pcconfig(pc)
 
     return struct(
-        libname = libname,
+        libnames = libnames,
         includedir = includedir,
         libdir = libdir,
         linkopts = linkopts,
