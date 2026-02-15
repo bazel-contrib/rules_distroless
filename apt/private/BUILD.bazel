@@ -3,6 +3,7 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 exports_files([
     "dpkg_statusd.sh",
     "dpkg_status.sh",
+    "sysroot.sh",
     "copy.sh.tmpl",
     "package.BUILD.tmpl",
 ])
@@ -17,6 +18,13 @@ bzl_library(
 bzl_library(
     name = "dpkg_statusd",
     srcs = ["dpkg_statusd.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = ["//distroless/private:tar"],
+)
+
+bzl_library(
+    name = "sysroot",
+    srcs = ["sysroot.bzl"],
     visibility = ["//apt:__subpackages__"],
     deps = ["//distroless/private:tar"],
 )

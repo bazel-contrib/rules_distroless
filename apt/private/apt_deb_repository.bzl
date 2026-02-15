@@ -100,25 +100,37 @@ def _fetch_contents(mctx, urls, dist, comp, arch, integrity):
         download = None
         for (ext, cmd) in supported_extensions:
             output = "{}/Contents{}".format(target_triple, ext)
-            dist_url = "{}/dists/{}/{}/Contents-{}{}".format(url, dist, comp, arch, ext)
-            auth = {}
-            if url in base_auth:
-                auth = {dist_url: base_auth[url]}
-            download = mctx.download(
-                url = dist_url,
-                output = output,
-                integrity = integrity,
-                allow_fail = True,
-                auth = auth,
-            )
-            decompress_r = None
-            if download.success:
-                decompress_r = mctx.execute(cmd + [output])
-                if decompress_r.return_code == 0:
-                    integrity = download.integrity
-                    break
+            dist_urls = [
+                "{}/dists/{}/{}/Contents-{}{}".format(url, dist, comp, arch, ext),
+            ]
+            if comp:
+                # Ubuntu publishes Contents indices as dists/<suite>/Contents-<arch>.gz
+                # rather than dists/<suite>/<component>/Contents-<arch>.gz.
+                dist_urls.append(
+                    "{}/dists/{}/Contents-{}{}".format(url, dist, arch, ext),
+                )
+            for dist_url in dist_urls:
+                auth = {}
+                if url in base_auth:
+                    auth = {dist_url: base_auth[url]}
+                download = mctx.download(
+                    url = dist_url,
+                    output = output,
+                    integrity = integrity,
+                    allow_fail = True,
+                    auth = auth,
+                )
+                decompress_r = None
+                if download.success:
+                    decompress_r = mctx.execute(cmd + [output])
+                    if decompress_r.return_code == 0:
+                        integrity = download.integrity
+                        break
 
-            failed_attempts.append((dist_url, download, decompress_r))
+                failed_attempts.append((dist_url, download, decompress_r))
+
+            if download.success and decompress_r != None and decompress_r.return_code == 0:
+                break
 
         if download.success:
             break
@@ -184,7 +196,7 @@ def _parse_contents(state, rcontents, arch):
         filepath = line[:first_empty_char]
         pkgs = line[last_empty_char + 1:].split(",")
         for pkg in pkgs:
-            contents.setdefault(pkg[pkg.find("/") + 1:], []).append(filepath)
+            contents.setdefault(pkg[pkg.rfind("/") + 1:], []).append(filepath)
     state.filemap[arch] = contents
 
 def _add_package(state, package):

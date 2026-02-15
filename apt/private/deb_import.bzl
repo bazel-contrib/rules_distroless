@@ -125,8 +125,65 @@ def resolve_symlink(target_path, relative_symlink):
     resolved_path = "/".join(result_parts)
     return resolved_path
 
+def _list_data_contents(rctx):
+    result = rctx.execute([
+        "sh",
+        "-c",
+        "dpkg-deb --fsys-tarfile package.deb | tar --exclude='./usr/share/**' --exclude='./**/' -tvf -",
+    ])
+    if result.return_code != 0:
+        fail("Failed to list package.deb filesystem tar stream: {}".format(result.stderr))
+    return result
+
+def _extract_data_files(rctx, files):
+    if not files:
+        return
+    result = rctx.execute([
+        "sh",
+        "-c",
+        "dpkg-deb --fsys-tarfile package.deb | tar -xvf - " + " ".join(files),
+    ])
+    if result.return_code != 0:
+        fail("Failed to extract selected files from package.deb: {}".format(result.stderr))
+
+def _library_stem(path):
+    filename = path[path.rfind("/") + 1:]
+    so_index = filename.find(".so")
+    if so_index == -1:
+        return ""
+    return filename[:so_index]
+
+def _normalize_path(path):
+    return path.strip().removeprefix("./")
+
+def _is_linkable_shared_lib(path):
+    filename = path[path.rfind("/") + 1:]
+    # Keep only linker-facing soname stubs (for example "libudev.so").
+    # Versioned runtime objects and plugin modules (for example gconv codecs)
+    # should not be converted into `-l` flags by downstream rules.
+    if not (filename.startswith("lib") and filename.endswith(".so")):
+        return False
+
+    # Glibc ships profiling/debug helper DSOs that must never be linked into
+    # regular binaries by default. Treat them as runtime artifacts only.
+    if filename in [
+        "libmemusage.so",
+        "libpcprofile.so",
+        "libc_malloc_debug.so",
+    ]:
+        return False
+
+    return True
+
 def _discover_contents(rctx, depends_on, depends_file_map, target_name):
-    result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
+    normalized_dep_files = {}
+    for dep_name, files in depends_file_map.items():
+        normalized_dep_files[dep_name] = [
+            _normalize_path(f)
+            for f in (files or [])
+        ]
+
+    result = _list_data_contents(rctx)
     contents_raw = result.stdout.splitlines()
 
     so_files = []
@@ -143,25 +200,29 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         if line.endswith("/"):
             continue
 
-        line = line[line.find(" ./") + 3:]
+        line = line[line.find(" ./") + 3:].strip()
 
         # Skip everything in man pages and examples
         if line.startswith("usr/share"):
             continue
 
         is_symlink_idx = line.find(" -> ")
+        symlink_separator_len = 4
+        if is_symlink_idx == -1:
+            is_symlink_idx = line.find(" link to ")
+            symlink_separator_len = len(" link to ")
         resolved_symlink = None
         if is_symlink_idx != -1:
-            symlink_target = line[is_symlink_idx + 4:]
-            line = line[:is_symlink_idx]
+            symlink_target = line[is_symlink_idx + symlink_separator_len:].strip()
+            line = line[:is_symlink_idx].strip()
             if line.endswith(".pc"):
                 continue
 
             # An absolute symlink
-            if symlink_target.startswith("/"):
-                resolved_symlink = symlink_target.removeprefix("/")
+            if symlink_target.startswith("/") or symlink_target.startswith("./"):
+                resolved_symlink = _normalize_path(symlink_target.removeprefix("/"))
             else:
-                resolved_symlink = resolve_symlink(line, symlink_target).removeprefix("./")
+                resolved_symlink = _normalize_path(resolve_symlink(line, symlink_target))
 
         if (line.endswith(".so") or line.find(".so.") != -1) and line.find("lib") != -1:
             if line.find("libthread_db") != -1:
@@ -188,29 +249,49 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     # Resolve symlinks:
     unresolved_symlinks = {} | symlinks
 
-    # TODO: this is highly inefficient, change the filemapping to be
-    # file -> package instead of package -> files
-    for dep in depends_on:
-        (suite, name, arch, _) = lockfile.parse_package_key(dep)
-        filemap = depends_file_map.get(name, []) or []
-        for file in filemap:
-            if len(unresolved_symlinks) == 0:
-                break
-            for (symlink, symlink_target) in unresolved_symlinks.items():
-                if file == symlink_target:
-                    unresolved_symlinks.pop(symlink)
-                    symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
-    
+    # Resolve links whose target is in the current package first. This is
+    # required for chains such as libfoo.so -> ../llvm/libfoo.so where the
+    # intermediate target is another link entry in this package.
+    package_files = {
+        path: True
+        for path in so_files + h_files + hpp_files + a_files + hpp_files_woext
+    }
+    for (symlink, symlink_target) in list(unresolved_symlinks.items()):
+        if symlink_target in package_files:
+            symlinks.pop(symlink)
+            unresolved_symlinks.pop(symlink)
 
-    # Resolve self symlinks
-    self_symlinks = {}
-    for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
-        for (symlink, symlink_target) in unresolved_symlinks.items():
-            if file == symlink_target:
-                self_symlinks[symlink] = symlinks.pop(symlink)
+    # Resolve cross-package links from dependency file maps.
+    dep_key_by_name = {}
+    for dep in depends_on:
+        (_, name, _, _) = lockfile.parse_package_key(dep)
+        dep_key_by_name[name] = dep
+
+    for (symlink, symlink_target) in list(unresolved_symlinks.items()):
+        for (dep_name, files) in normalized_dep_files.items():
+            if symlink_target not in files:
+                continue
+            dep_key = dep_key_by_name.get(dep_name)
+            if dep_key:
                 unresolved_symlinks.pop(symlink)
-                if len(unresolved_symlinks) == 0:
-                    break
+                symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep_key), symlink_target)
+            break
+
+    # Fallback when Contents maps are incomplete: match against dependency package
+    # names using the SONAME stem (for example libudev.so.1 -> libudev1).
+    for (symlink, symlink_target) in list(unresolved_symlinks.items()):
+        stem = _library_stem(symlink_target)
+        if not stem:
+            continue
+        matches = []
+        for (dep_name, dep_key) in dep_key_by_name.items():
+            if dep_name.endswith("-dev"):
+                continue
+            if dep_name.startswith(stem):
+                matches.append(dep_key)
+        if len(matches) == 1:
+            unresolved_symlinks.pop(symlink)
+            symlinks[symlink] = "@%s//:%s" % (util.sanitize(matches[0]), symlink_target)
 
     if len(unresolved_symlinks):
         util.warning(
@@ -221,6 +302,23 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 json.encode_indent(unresolved_symlinks),
             ),
         )
+        # Keep unresolved links as archive-native link entries instead of trying to
+        # synthesize cross-package symlinks. As a fallback, drop unresolved link
+        # paths from generated targets to avoid dangling-output failures.
+        for symlink in unresolved_symlinks.keys():
+            symlinks.pop(symlink)
+            if symlink in so_files:
+                so_files.remove(symlink)
+            if symlink in a_files:
+                a_files.remove(symlink)
+            if symlink in h_files:
+                h_files.remove(symlink)
+            if symlink in hpp_files:
+                hpp_files.remove(symlink)
+            if symlink in hpp_files_woext:
+                hpp_files_woext.remove(symlink)
+            if symlink in o_files:
+                o_files.remove(symlink)
 
     outs = []
 
@@ -238,19 +336,27 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     pkgconfigs = []
     if len(pc_files):
         # TODO: use rctx.extract instead.
-        rctx.execute(
-            ["tar", "-xvf", "data.tar.xz"] + ["./" + pc for pc in pc_files],
-        )
+        _extract_data_files(rctx, ["./" + pc for pc in pc_files])
         for pc in pc_files:
             if rctx.path(pc).exists:
                 pkgconfigs.append(pc)
+
+    linkable_so_files = []
+    for so in so_files:
+        if not _is_linkable_shared_lib(so):
+            continue
+        resolved = symlinks.get(so)
+        if resolved and resolved.startswith("@"):
+            linkable_so_files.append(resolved)
+        else:
+            linkable_so_files.append(so)
 
     build_file_content = """
 so_library(
     name = "_so_libs",
     dynamic_libs = {}
 )
-""".format(so_files)
+""".format(linkable_so_files)
 
     rpaths = {}
     for so in so_files + a_files:
@@ -292,7 +398,11 @@ so_library(
               IGNORE = ["libfl"]
               for so_lib in so_files:
                   if libname and libname not in IGNORE and so_lib.endswith(libname + ".so"):
-                      shared_lib = '":%s"' % so_lib
+                      resolved = symlinks.get(so_lib)
+                      if resolved and resolved.startswith("@"):
+                          shared_lib = '"%s"' % resolved
+                      else:
+                          shared_lib = '":%s"' % so_lib
                       break
 
               build_file_content += _CC_IMPORT_TMPL.format(
@@ -306,6 +416,13 @@ so_library(
                   }.keys(),
                   linkopts = pkgc.linkopts,
               )
+
+        # Some distro .pc files still advertise generic paths (for example
+        # /usr/lib) while actual shared libs are installed in multiarch dirs.
+        # Include discovered package lib dirs as fallback search paths.
+        for rp in rpaths:
+            if rp not in link_paths:
+                link_paths.append(rp)
 
         build_file_content += _CC_LIBRARY_TMPL.format(
             name = target_name,
@@ -325,9 +442,6 @@ so_library(
                 ] + [
                     "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
                     for lp in link_paths
-                ] + [
-                    "-Wl,-rpath=/" + rp
-                    for rp in rpaths
                 ]
             }.keys(),
             direct_deps = import_targets + [":_so_libs"],
@@ -345,6 +459,11 @@ so_library(
         )
     else:
         extra_linkopts = []
+        strip_include_prefix = '"usr/include"'
+        for header in h_files + hpp_files:
+            if not header.startswith("usr/include/"):
+                strip_include_prefix = None
+                break
         if target_name == "libbsd0":
             extra_linkopts = [
                 "-Wl,--remap-inputs=/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7=$(BINDIR)/external/{}/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7".format(rctx.attr.name),
@@ -363,26 +482,22 @@ so_library(
                 # # Required for bazel test binary to find its dependencies.
                 # "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rp)
                 # for rp in rpaths
-            ] + [
-                # Required for ld to validate rpath entries
-                "-Wl,-rpath-link=$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
-                for rp in rpaths
-            ] + [
-                # Required for containers to find the dependencies at runtime.
-                "-Wl,-rpath=/" + rp
-                for rp in rpaths
             ] + extra_linkopts,
-            strip_include_prefix = '"usr/include"',
+            strip_include_prefix = strip_include_prefix,
             direct_deps = [":_so_libs"],
         )
 
     return (build_file_content, outs, symlinks)
 
 def _deb_import_impl(rctx):
-    rctx.download_and_extract(
+    rctx.download(
         url = rctx.attr.urls,
+        output = "package.deb",
         sha256 = rctx.attr.sha256,
     )
+    extract_result = rctx.execute(["ar", "x", "package.deb"])
+    if extract_result.return_code != 0:
+        fail("Failed to extract package.deb: {}".format(extract_result.stderr))
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
     cc_import_targets, outs, symlinks = _discover_contents(

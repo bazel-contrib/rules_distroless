@@ -103,7 +103,6 @@ def process_pcconfig(pc):
                 if not linkpath:
                     continue
                 link_paths.append(linkpath)
-                linkopts.append("-Wl,-rpath=" + arg.removeprefix("-L"))
                 continue
             elif arg.startswith("-l"):
                 libnames.append("lib" + arg.removeprefix("-l"))

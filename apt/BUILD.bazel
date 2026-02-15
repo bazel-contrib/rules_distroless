@@ -11,6 +11,7 @@ bzl_library(
     deps = [
         "//apt/private:dpkg_status",
         "//apt/private:dpkg_statusd",
+        "//apt/private:sysroot",
     ],
 )
 
