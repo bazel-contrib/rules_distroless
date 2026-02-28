@@ -5,11 +5,12 @@ readonly bsdtar="$1"
 readonly package_path="$2"
 readonly cacerts_out="$3"
 readonly copyright_out="$4"
-readonly tmp="$(mktemp -d)"
+readonly coreutils="$5"
+readonly tmp="$($coreutils mktemp -d)"
 
 "$bsdtar" -xf "$package_path" -C "$tmp" ./usr/share/ca-certificates ./usr/share/doc/ca-certificates/copyright
 
-mv "$tmp/usr/share/doc/ca-certificates/copyright" "$copyright_out"
+$coreutils mv "$tmp/usr/share/doc/ca-certificates/copyright" "$copyright_out"
 
 function add_cert () {
     local dir="$1"
@@ -28,4 +29,4 @@ function add_cert () {
 }
 
 add_cert "$tmp/usr/share/ca-certificates"
-rm -rf "$tmp"
+$coreutils rm -rf "$tmp"

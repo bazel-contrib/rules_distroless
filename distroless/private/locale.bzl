@@ -29,6 +29,7 @@ locale(
 
 def _locale_impl(ctx):
     bsdtar = ctx.toolchains[tar_lib.TOOLCHAIN_TYPE]
+    coreutils = ctx.toolchains["@bazel_lib//lib:coreutils_toolchain_type"]
 
     output = ctx.actions.declare_file(ctx.attr.name + ".tar.gz")
 
@@ -38,6 +39,8 @@ def _locale_impl(ctx):
     args.add(output)
     args.add(ctx.file.package)
     args.add(ctx.attr.time)
+    args.add(coreutils.coreutils_info.bin)
+    args.add(ctx.executable._gawk)
     args.add("--include", "^./usr/$")
     args.add("--include", "^./usr/lib/$")
     args.add("--include", "^./usr/lib/locale/$")
@@ -51,7 +54,11 @@ def _locale_impl(ctx):
         executable = ctx.executable._locale_sh,
         inputs = [ctx.file.package],
         outputs = [output],
-        tools = bsdtar.default.files,
+        tools = [
+            bsdtar.default.files,
+            coreutils.default.files,
+            ctx.executable._gawk,
+        ],
         arguments = [args],
     )
     return [
@@ -78,7 +85,13 @@ locale = rule(
             doc = "time for the entries",
             default = "0.0",
         ),
+        "_gawk": attr.label(
+            allow_single_file = True,
+            executable = True,
+            cfg = "exec",
+            default = "@gawk//:gawk",
+        ),
     },
     implementation = _locale_impl,
-    toolchains = [tar_lib.TOOLCHAIN_TYPE],
+    toolchains = [tar_lib.TOOLCHAIN_TYPE, "@bazel_lib//lib:coreutils_toolchain_type"],
 )

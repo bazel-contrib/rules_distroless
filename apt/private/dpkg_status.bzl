@@ -7,6 +7,7 @@ _DOC = """TODO: docs"""
 
 def _dpkg_status_impl(ctx):
     bsdtar = ctx.toolchains[tar_lib.TOOLCHAIN_TYPE]
+    coreutils = ctx.toolchains["@bazel_lib//lib:coreutils_toolchain_type"]
 
     output = ctx.actions.declare_file(ctx.attr.name + ".tar")
 
@@ -14,13 +15,18 @@ def _dpkg_status_impl(ctx):
     args.add(bsdtar.tarinfo.binary)
     args.add(output)
     args.add(ctx.executable._gawk.path)
+    args.add(coreutils.coreutils_info.bin)
     args.add_all(ctx.files.controls)
 
     ctx.actions.run(
         executable = ctx.executable._dpkg_status_sh,
         inputs = ctx.files.controls,
         outputs = [output],
-        tools = [bsdtar.default.files, ctx.executable._gawk],
+        tools = [
+            bsdtar.default.files,
+            ctx.executable._gawk,
+            coreutils.default.files,
+        ],
         arguments = [args],
     )
 
@@ -49,5 +55,5 @@ dpkg_status = rule(
         ),
     },
     implementation = _dpkg_status_impl,
-    toolchains = [tar_lib.TOOLCHAIN_TYPE],
+    toolchains = [tar_lib.TOOLCHAIN_TYPE, "@bazel_lib//lib:coreutils_toolchain_type"],
 )

@@ -4,12 +4,13 @@ set -o pipefail -o errexit
 bsdtar="$1";
 deduplicate="$2";
 readonly awk="$3"
-shift 3;
+readonly coreutils="$4"
+shift 4;
 
 # Deduplication requested, use this complex pipeline to deduplicate.
 if [[ "$deduplicate" == "True" ]]; then
 
-    mtree=$(mktemp)
+    mtree=$($coreutils mktemp)
 
     # List files in all archives and append to single column mtree.
     for arg in "$@"; do
