@@ -26,6 +26,7 @@ use_repo(yq_toolchains, "yq_windows_amd64")
 
 bazel_lib_toolchains = use_extension("@bazel_lib//lib:extensions.bzl", "toolchains")
 use_repo(bazel_lib_toolchains, "zstd_toolchains")
+use_repo(bazel_lib_toolchains, "coreutils_toolchains")
 
 tar_toolchains = use_extension("@tar.bzl//tar:extensions.bzl", "toolchains")
 use_repo(tar_toolchains, "bsd_tar_toolchains")

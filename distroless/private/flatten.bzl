@@ -6,6 +6,7 @@ _DOC = """Flatten multiple archives into single archive."""
 
 def _flatten_impl(ctx):
     bsdtar = ctx.toolchains[tar_lib.TOOLCHAIN_TYPE]
+    coreutils = ctx.toolchains["@bazel_lib//lib:coreutils_toolchain_type"]
 
     ext = tar_lib.common.compression_to_extension[ctx.attr.compress] if ctx.attr.compress else ".tar"
     output = ctx.actions.declare_file(ctx.attr.name + ext)
@@ -14,6 +15,7 @@ def _flatten_impl(ctx):
     args.add(bsdtar.tarinfo.binary)
     args.add(str(ctx.attr.deduplicate))
     args.add(ctx.executable._gawk.path)
+    args.add(coreutils.coreutils_info.bin)
     args.add_all(tar_lib.DEFAULT_ARGS)
     args.add("--create")
     tar_lib.common.add_compression_args(ctx.attr.compress, args)
@@ -24,7 +26,11 @@ def _flatten_impl(ctx):
         executable = ctx.executable._flatten_sh,
         inputs = ctx.files.tars,
         outputs = [output],
-        tools = [bsdtar.default.files, ctx.executable._gawk],
+        tools = [
+            bsdtar.default.files,
+            ctx.executable._gawk,
+            coreutils.default.files,
+        ],
         arguments = [args],
         mnemonic = "Flatten",
         progress_message = "Flattening %{label}",
@@ -62,5 +68,5 @@ Deduplication is performed only for directories.
         ),
     },
     implementation = _flatten_impl,
-    toolchains = [tar_lib.TOOLCHAIN_TYPE],
+    toolchains = [tar_lib.TOOLCHAIN_TYPE, "@bazel_lib//lib:coreutils_toolchain_type"],
 )

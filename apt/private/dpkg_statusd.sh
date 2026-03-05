@@ -6,11 +6,12 @@ readonly out="$2"
 readonly control_path="$3"
 readonly package_name="$4"
 readonly awk="$5"
-shift 5
+readonly coreutils="$6"
+shift 6
 
 include=(--include "^./control$" --include "^./md5sums$")
 
-tmp=$(mktemp -d)
+tmp=$($coreutils mktemp -d)
 "$bsdtar" -xf "$control_path" "${include[@]}" -C "$tmp"
 
 "$bsdtar" -cf - $@ --format=mtree "${include[@]}" --options '!gname,!uname,!sha1,!nlink,!time' "@$control_path" | \

@@ -45,6 +45,7 @@ oci_image(
 
 def _cacerts_impl(ctx):
     bsdtar = ctx.toolchains[tar_lib.TOOLCHAIN_TYPE]
+    coreutils = ctx.toolchains["@bazel_lib//lib:coreutils_toolchain_type"]
 
     cacerts = ctx.actions.declare_file(ctx.attr.name + ".crt")
     copyright = ctx.actions.declare_file(ctx.attr.name + ".copyright")
@@ -52,12 +53,16 @@ def _cacerts_impl(ctx):
         executable = ctx.executable._cacerts_sh,
         inputs = [ctx.file.package],
         outputs = [cacerts, copyright],
-        tools = bsdtar.default.files,
+        tools = [
+            bsdtar.default.files,
+            coreutils.default.files,
+        ],
         arguments = [
             bsdtar.tarinfo.binary.path,
             ctx.file.package.path,
             cacerts.path,
             copyright.path,
+            coreutils.coreutils_info.bin.path,
         ],
     )
 
@@ -100,5 +105,5 @@ cacerts = rule(
         ),
     },
     implementation = _cacerts_impl,
-    toolchains = [tar_lib.TOOLCHAIN_TYPE],
+    toolchains = [tar_lib.TOOLCHAIN_TYPE, "@bazel_lib//lib:coreutils_toolchain_type"],
 )
