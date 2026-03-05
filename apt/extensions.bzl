@@ -156,9 +156,10 @@ def _distroless_extension(mctx):
         if len(unmet_dependencies):
             util.warning(
                 mctx,
-                "Following dependencies could not be resolved for %s: %s" % (
+                "Following dependencies could not be resolved for %s: %s (dependency set %s)" % (
                     name,
                     ",".join([up[0] for up in unmet_dependencies]),
+                    dependency_set_name,
                 ),
             )
 
