@@ -70,11 +70,13 @@ def _version_relop(va, vb, op):
         return version_lib.eq(va, vb)
     fail("unknown op %s" % op)
 
-def _is_satisfied_by(va, vb):
-    if vb[0] != "=":
+def _is_satisfied_by(v_requested, v_provided):
+    if v_provided[0] != "=":
         fail("Per https://www.debian.org/doc/debian-policy/ch-relationships.html only = is allowed for Provides field.")
 
-    return _version_relop(va[1], vb[1], va[0])
+    v_requested_op = v_requested[0]
+    return _version_relop(v_provided[1], v_requested[1], v_requested_op)
+
 
 version_constraint = struct(
     relop = _version_relop,

@@ -4,8 +4,12 @@ load(":version.bzl", version_lib = "version")
 load(":version_constraint.bzl", "version_constraint")
 
 def _resolve_package(state, name, version, arch, suites = None):
-    # First check if the constraint is satisfied by a virtual package
-    virtual_packages = state.repository.virtual_packages(name = name, arch = arch, suites = suites)
+    # First check if the constraint is satisfied by a virtual package.
+    # Check both the specific arch and "all" since Architecture: all packages
+    # can provide virtual packages too.
+    virtual_packages_for_arch = state.repository.virtual_packages(name = name, arch = arch, suites = suites)
+    virtual_packages_for_all = state.repository.virtual_packages(name = name, arch = "all", suites = suites)
+    virtual_packages = virtual_packages_for_arch + virtual_packages_for_all
 
     candidates = [
         package
