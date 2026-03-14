@@ -1,13 +1,3 @@
-"""
-NOTE:
-
-        This is the main test used in the e2e testing.
-
-  PLEASE KEEP e2e/smoke/BUILD and examples/debian_snapshot/BUILD
-  IN-SYNC WITH EACH OTHER, AS WELL AS THE REST OF THE TEST FILES
-    (test_linux_<ARCH> files and the bullseye YAML manifest)
-"""
-
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@container_structure_test//:defs.bzl", "container_structure_test")
 load("@rules_distroless//distroless:defs.bzl", "cacerts", "group", "passwd")

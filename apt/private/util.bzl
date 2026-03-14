@@ -30,6 +30,18 @@ def _get_repo_name(st):
         return st.split("+")[-1]
     return st.split("~")[-1]
 
+_SNAPSHOT_DOMAINS = [
+    "snapshot.debian.org",
+    "snapshot-cloudflare.debian.org",
+    "snapshot.ubuntu.com",
+]
+
+def _is_snapshot_uri(uri):
+    for domain in _SNAPSHOT_DOMAINS:
+        if domain in uri:
+            return True
+    return False
+
 def _warning(rctx, message):
     rctx.execute([
         "echo",
@@ -42,4 +54,5 @@ util = struct(
     get_dict = _get_dict,
     warning = _warning,
     get_repo_name = _get_repo_name,
+    is_snapshot_uri = _is_snapshot_uri,
 )
