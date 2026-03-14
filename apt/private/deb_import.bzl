@@ -11,6 +11,7 @@ load("@rules_distroless//apt/private:deb_export.bzl", "deb_export")
 load("@rules_distroless//apt/private:so_library.bzl", "so_library")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_distroless//apt/private:cc_deb_library.bzl", "cc_deb_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
 
 deb_postfix(
@@ -99,6 +100,24 @@ cc_library(
 )
 """
 
+_CC_SYS_LIBRARY_TMPL = """
+cc_deb_library(
+    name = "{name}_wodeps",
+    hdrs = {hdrs},
+    deps = {direct_deps},
+    linkopts = {linkopts},
+    additional_compiler_inputs = {additional_compiler_inputs},
+    additional_linker_inputs = {additional_linker_inputs},
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "{name}",
+    deps = [":{name}_wodeps"] + {deps},
+    visibility = ["//visibility:public"],
+)
+"""
+
 def resolve_symlink(target_path, relative_symlink):
     # Split paths into components
     target_parts = target_path.split("/")
@@ -175,7 +194,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             h_files.append(line)
         elif line.endswith(".hpp"):
             hpp_files.append(line)
-        elif line.find("include/c++") != -1:
+        elif line.find("include/c++") != -1 or (line.find("usr/include/") != -1 and line[line.rfind("/") + 1:].find(".") == -1):
             hpp_files_woext.append(line)
         elif line.endswith(".o"):
             o_files.append(line)
@@ -200,7 +219,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 if file == symlink_target:
                     unresolved_symlinks.pop(symlink)
                     symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
-    
 
     # Resolve self symlinks
     self_symlinks = {}
@@ -276,36 +294,36 @@ so_library(
                 continue
 
             for libname in pkgc.libnames:
-              if libname + "_import" in import_targets:
-                continue
+                if libname + "_import" in import_targets:
+                    continue
 
-              subtarget = libname + "_import"
-              import_targets.append(subtarget)
+                subtarget = libname + "_import"
+                import_targets.append(subtarget)
 
-              # Look for a static archive
-              # for ar in a_files:
-              #     if ar.endswith(pkgc.libname + ".a"):
-              #         static_lib = '":%s"' % ar
-              #         break
+                # Look for a static archive
+                # for ar in a_files:
+                #     if ar.endswith(pkgc.libname + ".a"):
+                #         static_lib = '":%s"' % ar
+                #         break
 
-              # Look for a dynamic library
-              IGNORE = ["libfl"]
-              for so_lib in so_files:
-                  if libname and libname not in IGNORE and so_lib.endswith(libname + ".so"):
-                      shared_lib = '":%s"' % so_lib
-                      break
+                # Look for a dynamic library
+                IGNORE = ["libfl"]
+                for so_lib in so_files:
+                    if libname and libname not in IGNORE and so_lib.endswith(libname + ".so"):
+                        shared_lib = '":%s"' % so_lib
+                        break
 
-              build_file_content += _CC_IMPORT_TMPL.format(
-                  name = subtarget,
-                  shared_lib = shared_lib,
-                  static_lib = static_lib,
-                  hdrs = [],
-                  includes = {
-                      "external/.." + include: True
-                      for include in includes + ["/usr/include", "/usr/include/x86_64-linux-gnu"]
-                  }.keys(),
-                  linkopts = pkgc.linkopts,
-              )
+                build_file_content += _CC_IMPORT_TMPL.format(
+                    name = subtarget,
+                    shared_lib = shared_lib,
+                    static_lib = static_lib,
+                    hdrs = [],
+                    includes = {
+                        "external/.." + include: True
+                        for include in includes + ["/usr/include", "/usr/include/x86_64-linux-gnu"]
+                    }.keys(),
+                    linkopts = pkgc.linkopts,
+                )
 
         build_file_content += _CC_LIBRARY_TMPL.format(
             name = target_name,
@@ -349,7 +367,7 @@ so_library(
             extra_linkopts = [
                 "-Wl,--remap-inputs=/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7=$(BINDIR)/external/{}/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7".format(rctx.attr.name),
             ]
-        build_file_content += _CC_LIBRARY_TMPL.format(
+        build_file_content += _CC_SYS_LIBRARY_TMPL.format(
             name = target_name,
             hdrs = h_files + hpp_files,
             deps = deps,
@@ -372,7 +390,6 @@ so_library(
                 "-Wl,-rpath=/" + rp
                 for rp in rpaths
             ] + extra_linkopts,
-            strip_include_prefix = '"usr/include"',
             direct_deps = [":_so_libs"],
         )
 
@@ -394,13 +411,13 @@ def _deb_import_impl(rctx):
 
     foreign_symlinks = {}
     for (i, symlink) in enumerate(symlinks.values()):
-      if symlink not in foreign_symlinks:
-        foreign_symlinks[symlink] = []
-      foreign_symlinks[symlink].append(i)
+        if symlink not in foreign_symlinks:
+            foreign_symlinks[symlink] = []
+        foreign_symlinks[symlink].append(i)
 
     foreign_symlinks = {
-      symlink: json.encode(indices)
-      for (symlink, indices) in foreign_symlinks.items()
+        symlink: json.encode(indices)
+        for (symlink, indices) in foreign_symlinks.items()
     }
 
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
