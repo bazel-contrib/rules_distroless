@@ -1,9 +1,9 @@
-bazel_dep(name = "rules_distroless", version = "0.0.0", dev_dependency = True)
 bazel_dep(name = "bazel_skylib", version = "1.5.0", dev_dependency = True)
-bazel_dep(name = "platforms", version = "0.0.10", dev_dependency = True)
-bazel_dep(name = "rules_oci", version = "2.0.0", dev_dependency = True)
-bazel_dep(name = "container_structure_test", version = "1.21.1", dev_dependency = True)
 bazel_dep(name = "bazel_lib", version = "3.0.0", dev_dependency = True)
+bazel_dep(name = "container_structure_test", version = "1.21.1", dev_dependency = True)
+bazel_dep(name = "platforms", version = "0.0.10", dev_dependency = True)
+bazel_dep(name = "rules_distroless", version = "0.0.0", dev_dependency = True)
+bazel_dep(name = "rules_oci", version = "2.0.0", dev_dependency = True)
 
 bazel_dep(name = "tar.bzl", version = "0.6.0")
 
@@ -13,16 +13,75 @@ local_path_override(
 )
 
 apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
-apt.install(
-    name = "bullseye",
-    lock = ":bullseye.lock.json",
-    manifest = ":bullseye.yaml",
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = [
+        "main",
+        "contrib",
+    ],
+    suites = ["bullseye"],
+    types = ["deb"],
+    uris = [
+        "https://snapshot-cloudflare.debian.org/archive/debian/20240210T223313Z",
+        "https://snapshot.debian.org/archive/debian/20240210T223313Z",
+    ],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["bullseye-security"],
+    types = ["deb"],
+    uris = ["https://snapshot-cloudflare.debian.org/archive/debian-security/20240210T223313Z"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["bullseye-updates"],
+    types = ["deb"],
+    uris = ["https://snapshot-cloudflare.debian.org/archive/debian/20240210T223313Z"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["cloud-sdk"],
+    types = ["deb"],
+    uris = ["https://packages.cloud.google.com/apt"],
 )
 apt.install(
-    name = "bullseye_nolock",
-    manifest = ":bullseye.yaml",
-    nolock = True,
+    dependency_set = "bullseye",
+    packages = [
+        "apt",
+        "bash",
+        "ca-certificates",
+        "coreutils",
+        "dpkg",
+        "google-cloud-cli",
+        "libncurses6",
+        "ncurses-base",
+        "nginx-core",
+        "nginx-full",
+        "nvidia-kernel-common",
+        "perl",
+        "tzdata",
+    ],
+    suites = [
+        "bullseye",
+        "bullseye-security",
+        "bullseye-updates",
+        "cloud-sdk",
+    ],
 )
-
-# bazel run @bullseye//:lock
-use_repo(apt, "bullseye", "bullseye_nolock")
+apt.lock(into = ":bullseye.lock.json")
+use_repo(apt, "bullseye")
