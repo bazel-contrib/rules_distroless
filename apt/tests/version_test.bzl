@@ -100,6 +100,9 @@ def _is_satisfied_by_test(ctx):
         (">= 1.1", "= 1.1", True),
         ("<= 1.1", "= 1.1", True),
         (">> 1.1", "= 1.1", False),
+        (">> 1.1", "= 1.1", False),
+        (">= 246", "= 246.10", True),
+        (">= 1.5~dev0", "= 1.5~rc1", True),
     ]
 
     env = unittest.begin(ctx)

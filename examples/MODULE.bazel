@@ -1,0 +1,134 @@
+"Examples module for rules_distroless"
+
+module(
+    name = "rules_distroless_examples",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "rules_distroless", version = "0.0.0")
+local_path_override(
+    module_name = "rules_distroless",
+    path = "..",
+)
+
+bazel_dep(name = "aspect_bazel_lib", version = "2.14.0")
+bazel_dep(name = "bazel_skylib", version = "1.5.0")
+bazel_dep(name = "rules_oci", version = "2.0.0")
+bazel_dep(name = "rules_java", version = "8.8.0")
+bazel_dep(name = "container_structure_test", version = "1.16.0")
+bazel_dep(name = "platforms", version = "0.0.10")
+
+# Toolchains from aspect_bazel_lib
+bazel_lib_toolchains = use_extension("@aspect_bazel_lib//lib:extensions.bzl", "toolchains")
+use_repo(bazel_lib_toolchains, "bsd_tar_toolchains")
+use_repo(bazel_lib_toolchains, "zstd_toolchains")
+
+# Test fixture packages
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "example-bullseye-ca-certificates",
+    build_file_content = 'exports_files(["data.tar.xz", "control.tar.xz"])',
+    sha256 = "b2d488ad4d8d8adb3ba319fc9cb2cf9909fc42cb82ad239a26c570a2e749c389",
+    urls = ["https://snapshot.debian.org/archive/debian/20231106T210201Z/pool/main/c/ca-certificates/ca-certificates_20210119_all.deb"],
+)
+
+http_archive(
+    name = "example-bullseye-libc-bin",
+    build_file_content = 'exports_files(["data.tar.xz"])',
+    sha256 = "8b048ab5c7e9f5b7444655541230e689631fd9855c384e8c4a802586d9bbc65a",
+    urls = ["https://snapshot.debian.org/archive/debian-security/20231106T230332Z/pool/updates/main/g/glibc/libc-bin_2.31-13+deb11u7_amd64.deb"],
+)
+
+http_archive(
+    name = "example-bookworm-libc-bin",
+    build_file_content = 'exports_files(["data.tar.xz"])',
+    sha256 = "38c44247c5b3e864d6db2877edd9c9a0555fc4e23ae271b73d7f527802616df5",
+    urls = ["https://snapshot.debian.org/archive/debian-security/20231106T230332Z/pool/updates/main/g/glibc/libc-bin_2.36-9+deb12u3_armhf.deb"],
+)
+
+# APT extension for Debian/Ubuntu packages
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+
+# Debian Bullseye sources (for debian_snapshot example)
+# Using September 2024 snapshot
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = [
+        "bullseye",
+        "bullseye-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20240901T024950Z"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["bullseye-security"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian-security/20240901T024950Z"],
+)
+
+# Ubuntu Noble sources (for ubuntu_snapshot example)
+# NOTE: Commented out because snapshot URLs are returning 404
+# apt.sources_list(
+#     architectures = [
+#         "amd64",
+#         "arm64",
+#     ],
+#     components = ["main"],
+#     suites = [
+#         "noble",
+#         "noble-security",
+#         "noble-updates",
+#     ],
+#     types = ["deb"],
+#     uris = ["https://snapshot.ubuntu.com/ubuntu/20240301T030400Z"],
+# )
+
+# Install packages for Debian Bullseye example
+apt.install(
+    dependency_set = "bullseye",
+    packages = [
+        "bash",
+        "ca-certificates",
+        "coreutils",
+        "dpkg",
+        "libncurses6",
+        "ncurses-base",
+        "tzdata",
+    ],
+    suites = [
+        "bullseye",
+        "bullseye-updates",
+        "bullseye-security",
+    ],
+)
+
+# Install packages for Ubuntu Noble example
+# NOTE: Commented out because snapshot URLs are returning 404
+# apt.install(
+#     dependency_set = "noble",
+#     packages = [
+#         "bash",
+#         "coreutils",
+#         "dpkg",
+#         "libncurses6",
+#         "ncurses-base",
+#         "tzdata",
+#     ],
+#     suites = [
+#         "noble",
+#         "noble-security",
+#         "noble-updates",
+#     ],
+# )
+
+use_repo(apt, "bullseye")

@@ -1,101 +1,126 @@
 "lock"
 
-load("@bazel_skylib//lib:new_sets.bzl", "sets")
-load(":util.bzl", "util")
-
-def _make_package_key(name, version, arch):
-    return "%s_%s_%s" % (
-        util.sanitize(name),
-        util.sanitize(version),
+def _make_package_key(suite, name, version, arch):
+    return "/%s/%s:%s=%s" % (
+        suite,
+        name,
         arch,
+        version,
     )
 
-def _package_key(package, arch):
-    return _make_package_key(package["Package"], package["Version"], arch)
+def _parse_package_key(key):
+    rest = key[1:]
+    (suite, rest) = rest.split("/", 1)
+    (name, rest) = rest.split(":", 1)
+    (arch, version) = rest.split("=", 1)
+    return (suite, name, arch, version)
 
-def _add_package(lock, package, arch):
-    k = _package_key(package, arch)
-    if k in lock.fast_package_lookup:
+def _short_package_key(package):
+    return "/%s/%s:%s" % (
+        package["Dist"],
+        package["Package"],
+        package["Architecture"],
+    )
+
+def _package_key(package):
+    return _make_package_key(package["Dist"], package["Package"], package["Version"], package["Architecture"])
+
+def _add_package(lock, package):
+    k = _package_key(package)
+    if k in lock.packages:
         return
-    lock.packages.append({
-        "key": k,
+    lock.packages[k] = {
         "name": package["Package"],
         "version": package["Version"],
-        "urls": [
-            "%s/%s" % (root, package["Filename"])
-            for root in package["Roots"]
-        ],
+        "architecture": package["Architecture"],
         "sha256": package["SHA256"],
-        "arch": arch,
-        "dependencies": [],
-    })
-    lock.fast_package_lookup[k] = len(lock.packages) - 1
-    lock.fast_package_dependencies_lookup[k] = sets.make()
+        "filename": package["Filename"],
+        "suite": package["Dist"],
+        "section": package["Section"],
+        "size": int(package["Size"]),
+        "depends_on": [],
+    }
 
-def _add_package_dependency(lock, package, dependency, arch):
-    k = _package_key(package, arch)
-    if k not in lock.fast_package_lookup:
-        fail("Broken state: %s is not in the lockfile." % package["Package"])
-    i = lock.fast_package_lookup[k]
+def _add_package_dependency(lock, package, dependency):
+    k = _package_key(package)
+    if k not in lock.packages:
+        fail("illegal state: %s is not in the lockfile." % package["Package"])
+    sk = _package_key(dependency)
+    if sk in lock.packages[k]["depends_on"]:
+        return
+    lock.packages[k]["depends_on"].append(sk)
 
-    dependency_key = _package_key(dependency, arch)
-    if not sets.contains(lock.fast_package_dependencies_lookup[k], dependency_key):
-        lock.packages[i]["dependencies"].append(dict(
-            key = dependency_key,
-            name = dependency["Package"],
-            version = dependency["Version"],
-        ))
-        lock.fast_package_dependencies_lookup[k] = sets.insert(lock.fast_package_dependencies_lookup[k], dependency_key)
+def _has_package(lock, suite, name, version, arch):
+    return _make_package_key(suite, name, version, arch) in lock.packages
 
-def _has_package(lock, name, version, arch):
-    key = "%s_%s_%s" % (util.sanitize(name), util.sanitize(version), arch)
-    return key in lock.fast_package_lookup
+def _add_source(lock, suite, types, uris, components, architectures):
+    lock.sources[suite] = {
+        "types": types,
+        "uris": uris,
+        "components": components,
+        "architectures": architectures,
+    }
 
-def _create(rctx, lock):
+def _create(mctx, lock):
     return struct(
         has_package = lambda *args, **kwargs: _has_package(lock, *args, **kwargs),
+        add_source = lambda *args, **kwargs: _add_source(lock, *args, **kwargs),
         add_package = lambda *args, **kwargs: _add_package(lock, *args, **kwargs),
         add_package_dependency = lambda *args, **kwargs: _add_package_dependency(lock, *args, **kwargs),
         packages = lambda: lock.packages,
-        write = lambda out: rctx.file(out, json.encode_indent(struct(version = lock.version, packages = lock.packages)), executable = False),
-        as_json = lambda: json.encode_indent(struct(version = lock.version, packages = lock.packages)),
+        sources = lambda: lock.sources,
+        dependency_sets = lambda: lock.dependency_sets,
+        facts = lambda: lock.facts,
+        write = lambda out: mctx.file(out, _encode_compact(lock)),
+        as_json = lambda: _encode_compact(lock),
     )
 
-def _empty(rctx):
+def _empty(mctx):
     lock = struct(
-        version = 1,
-        packages = list(),
-        fast_package_lookup = dict(),
-        fast_package_dependencies_lookup = dict(),
+        version = 2,
+        dependency_sets = dict(),
+        packages = dict(),
+        sources = dict(),
+        facts = dict(),
     )
-    return _create(rctx, lock)
+    return _create(mctx, lock)
 
-def _from_json(rctx, content):
+def _encode_compact(lock):
+    return json.encode_indent(lock)
+
+def _from_json(mctx, content):
     if not content:
-        return _empty(rctx)
+        return _empty(mctx)
 
     lock = json.decode(content)
-    if lock["version"] != 1:
-        fail("invalid lockfile version")
+    if lock["version"] != 2:
+        fail("lock file version %d is not supported anymore. please upgrade your lock file" % lock["version"])
 
     lock = struct(
         version = lock["version"],
-        packages = lock["packages"],
-        fast_package_lookup = dict(),
-        fast_package_dependencies_lookup = dict(),
+        dependency_sets = lock["dependency_sets"] if "dependency_sets" in lock else dict(),
+        packages = lock["packages"] if "packages" in lock else dict(),
+        sources = lock["sources"] if "sources" in lock else dict(),
+        facts = lock["facts"] if "facts" in lock else dict(),
     )
-    for (i, package) in enumerate(lock.packages):
-        # TODO: only support urls before 1.0
-        if "url" in package:
-            package["urls"] = [package.pop("url")]
+    return _create(mctx, lock)
 
-        lock.packages[i] = package
-        lock.fast_package_lookup[package["key"]] = i
-        lock.fast_package_dependencies_lookup[package["key"]] = sets.make([d["key"] for d in package["dependencies"]])
-    return _create(rctx, lock)
+def _merge(mctx, locks):
+    mlock = _empty(mctx)
+    packages = mlock.packages()
+    facts = mlock.facts()
+    for lock in locks:
+        for (key, pkg) in lock.packages().items():
+            packages[key] = pkg
+        for (key, fact) in lock.facts().items():
+            facts[key] = fact
+    return mlock
 
 lockfile = struct(
     empty = _empty,
     from_json = _from_json,
-    make_package_key = _make_package_key,
+    package_key = _package_key,
+    short_package_key = _short_package_key,
+    parse_package_key = _parse_package_key,
+    merge = _merge,
 )

@@ -3,9 +3,13 @@
 load(":version.bzl", version_lib = "version")
 load(":version_constraint.bzl", "version_constraint")
 
-def _resolve_package(state, name, version, arch):
-    # First check if the constraint is satisfied by a virtual package
-    virtual_packages = state.repository.virtual_packages(name = name, arch = arch)
+def _resolve_package(state, name, version, arch, suites = None):
+    # First check if the constraint is satisfied by a virtual package.
+    # Check both the specific arch and "all" since Architecture: all packages
+    # can provide virtual packages too.
+    virtual_packages_for_arch = state.repository.virtual_packages(name = name, arch = arch, suites = suites)
+    virtual_packages_for_all = state.repository.virtual_packages(name = name, arch = "all", suites = suites)
+    virtual_packages = virtual_packages_for_arch + virtual_packages_for_all
 
     candidates = [
         package
@@ -17,10 +21,13 @@ def _resolve_package(state, name, version, arch):
         )
     ]
 
+    warning = None
+
     if len(candidates) == 1:
-        return candidates[0]
+        return (candidates[0], warning)
 
     if len(candidates) > 1:
+        versions = {}
         for package in candidates:
             # Return 'required' packages immediately since it is implicit that
             # they should exist on a default debian install.
@@ -32,19 +39,25 @@ def _resolve_package(state, name, version, arch):
             #
             # In the case of required packages, these defaults are not specified.
             if "Priority" in package and package["Priority"] == "required":
-                return package
+                return (package, warning)
+            versions[package["Version"]] = package
 
-        # Otherwise, we can't disambiguate the virtual package providers so
-        # choose none and warn.
-        # buildifier: disable=print
-        print("\nMultiple candidates for virtual package '{}': {}".format(
-            name,
-            [package["Package"] for package in candidates],
-        ))
+        sortedversions = version_lib.sort(versions.keys(), reverse = True)
+
+        # First element in the versions list is the latest version.
+        selected_version = sortedversions[0]
+        return (versions[selected_version], warning)
+
+        # # Otherwise, we can't disambiguate the virtual package providers so
+        # # choose none and warn.
+        # warning = "Multiple candidates for virtual package '{}': {}".format(
+        #     name,
+        #     ", ".join([package["Package"] + "" + package["Version"] for package in candidates]),
+        # )
 
     # Get available versions of the package
-    versions_by_arch = state.repository.package_versions(name = name, arch = arch)
-    versions_by_any_arch = state.repository.package_versions(name = name, arch = "all")
+    versions_by_arch = state.repository.package_versions(name = name, arch = arch, suites = suites)
+    versions_by_any_arch = state.repository.package_versions(name = name, arch = "all", suites = suites)
 
     # Order packages by highest to lowest
     versions = version_lib.sort(versions_by_arch + versions_by_any_arch, reverse = True)
@@ -64,26 +77,30 @@ def _resolve_package(state, name, version, arch):
         # First element in the versions list is the latest version.
         selected_version = versions[0]
 
-    package = state.repository.package(name = name, version = selected_version, arch = arch)
+    package = state.repository.package(name = name, version = selected_version, arch = arch, suites = suites)
     if not package:
-        package = state.repository.package(name = name, version = selected_version, arch = "all")
+        package = state.repository.package(name = name, version = selected_version, arch = "all", suites = suites)
 
-    return package
+    return (package, warning)
 
 _ITERATION_MAX_ = 2147483646
 
 # For future: unfortunately this function uses a few state variables to track
 # certain conditions and package dependency groups.
 # TODO: Try to simplify it in the future.
-def _resolve_all(state, name, version, arch, include_transitive = True):
-    root_package = None
+def _resolve_all(state, name, version, arch, include_transitive = True, suites = None):
     unmet_dependencies = []
+    root_package = None
     dependencies = []
+    direct_dependencies = {}
 
     # state variables
     already_recursed = {}
     dependency_group = []
     stack = [(name, version, -1)]
+    warnings = []
+
+    path = []
 
     for i in range(0, _ITERATION_MAX_ + 1):
         if not len(stack):
@@ -97,8 +114,13 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         if dependency_group_idx > -1 and dependency_group[dependency_group_idx][0]:
             continue
 
-        package = _resolve_package(state, name, version, arch)
+        path.append(name)
 
+        (package, warning) = _resolve_package(state, name, version, arch, suites = suites)
+        if warning:
+            warnings.append(warning)
+
+        # Unmet optional dependency encountered
         # If this package is not found and is part of a dependency group, then just skip it.
         if not package and dependency_group_idx > -1:
             continue
@@ -120,12 +142,13 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
 
         # If we encountered package before in the transitive closure, skip it
         if key in already_recursed:
+            # fail(" -> ".join(path))
             continue
 
         # Do not add dependency if it's a root package to avoid circular dependency.
         if i != 0 and key != root_package["Package"]:
             # Add it to the dependencies
-            already_recursed[key] = True
+            already_recursed[key] = package["Version"]
             dependencies.append(package)
 
         deps = []
@@ -157,7 +180,7 @@ def _resolve_all(state, name, version, arch, include_transitive = True):
         if not met:
             unmet_dependencies.append((dep, None))
 
-    return (root_package, dependencies, unmet_dependencies)
+    return (root_package, dependencies, unmet_dependencies, warnings)
 
 def _create_resolution(repository):
     state = struct(repository = repository)

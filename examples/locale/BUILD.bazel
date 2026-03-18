@@ -1,5 +1,5 @@
-load("//distroless:defs.bzl", "locale")
-load("//distroless/tests:asserts.bzl", "assert_tar_mtree")
+load("@rules_distroless//distroless:defs.bzl", "locale")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_tar_mtree")
 
 EPOCH = 123
 

@@ -1,5 +1,5 @@
-load("//distroless:defs.bzl", "java_keystore")
-load("//distroless/tests:asserts.bzl", "assert_jks_listing", "assert_tar_mtree")
+load("@rules_distroless//distroless:defs.bzl", "java_keystore")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_jks_listing", "assert_tar_mtree")
 
 java_keystore(
     name = "java_keystore",
