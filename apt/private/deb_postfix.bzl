@@ -22,6 +22,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     esac
 """
     toolchains = ["@zstd_toolchains//:resolved_toolchain"]
+    tools = []
 
     # If mergedusr, then rewrite paths to hoist bins/libs from / of the fs to /usr counterpart.
     # Be careful with this option as it assumes that /usr/ is mounted as one filesystem.
@@ -34,6 +35,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     # https://salsa.debian.org/md/usrmerge/-/tree/master/debian?ref_type=heads
     if mergedusr:
         toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"]
+        tools.append("@gawk//:gawk")
         apply = """\
             $(BSDTAR_BIN) --confirmation --gzip --options 'gzip:!timestamp' -cf "$$layer" \
             -s "#^\\./bin/\\(.\\)#./usr/bin/\\1#" \
@@ -91,6 +93,6 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
         %s
         """ % apply,
         toolchains = toolchains,
-        tools = ["@gawk//:gawk"],
+        tools = tools,
         **kwargs
     )
