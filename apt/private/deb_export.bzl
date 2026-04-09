@@ -45,23 +45,43 @@ def _deb_export_impl(ctx):
 
     if len(ctx.outputs.outs):
         fout = ctx.outputs.outs[0]
-        output = fout.path[:fout.path.find(fout.owner.repo_name) + len(fout.owner.repo_name)]
+        output_base = fout.path[:fout.path.find(fout.owner.repo_name) + len(fout.owner.repo_name)]
+        fix_linker_scripts_cmd = """
+find "{output_base}" -name "*.so" -type f | while read f; do
+    if grep -qE "^(GROUP|INPUT|OUTPUT_FORMAT)" "$f" 2>/dev/null; then
+        sed -i \\
+            -e 's|/usr/lib/x86_64-linux-gnu/||g' \\
+            -e 's|/lib/x86_64-linux-gnu/||g' \\
+            -e 's|/usr/lib/aarch64-linux-gnu/||g' \\
+            -e 's|/lib/aarch64-linux-gnu/||g' \\
+            -e 's|/usr/lib/||g' \\
+            -e 's|/lib64/||g' \\
+            -e 's|/lib/||g' \\
+            "$f" 2>/dev/null || true
+    fi
+done
+""".format(output_base = output_base)
         args = ctx.actions.args()
-        args.add("-xf")
         args.add_all(ctx.files.srcs)
-        args.add("-C")
-        args.add(output)
+        args.add(output_base)
         args.add_all(
             ctx.outputs.outs,
             map_each = lambda src: src.short_path[len(src.owner.repo_name) + 4:],
             allow_closure = True,
         )
-        ctx.actions.run(
-            executable = bsdtar.tarinfo.binary,
-            inputs = ctx.files.srcs,
+        ctx.actions.run_shell(
             outputs = ctx.outputs.outs,
+            inputs = ctx.files.srcs,
+            tools = [bsdtar.tarinfo.binary],
+            command = """
+                "{tar}" -xf $1 -C $2 "${{@:3}}"
+                {fix_scripts}
+            """.format(
+                tar = bsdtar.tarinfo.binary.path,
+                fix_scripts = fix_linker_scripts_cmd,
+            ),
             arguments = [args],
-            mnemonic = "Unpack",
+            mnemonic = "UnpackAndFixScripts",
             toolchain = TAR_TOOLCHAIN_TYPE,
         )
 
