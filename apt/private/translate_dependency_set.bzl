@@ -9,6 +9,7 @@ _ROOT_BUILD_TMPL = """\
 
 load("@rules_distroless//apt:defs.bzl", "dpkg_status")
 load("@rules_distroless//distroless:defs.bzl", "flatten")
+load("@rules_distroless//apt/private:merge_directory.bzl", "merge_directory")
 
 exports_files(['packages.bzl'])
 
@@ -88,6 +89,12 @@ flatten(
     deduplicate = True,
     visibility = ["//visibility:public"],
 )
+
+merge_directory(
+    name = "directory",
+    srcs = {export_targets},
+    visibility = ["//visibility:public"],
+)
 """
 
 _PACKAGE_TEMPLATE = '''\
@@ -140,6 +147,8 @@ def _translate_dependency_set_impl(rctx):
     dependency_sets = lockf.dependency_sets()
     dependency_set = dependency_sets[rctx.attr.depset_name]
 
+    export_targets = []
+    export_targets_seen = {}
     packages_to_architectures = {}
 
     for architecture in dependency_set["sets"].keys():
@@ -147,6 +156,10 @@ def _translate_dependency_set_impl(rctx):
             package_key = short_key + "=" + version
             repo_name = util.sanitize(package_key)
             package = packages[package_key]
+
+            if package_key not in export_targets_seen:
+                export_targets.append("@%s//:export" % repo_name)
+                export_targets_seen[package_key] = True
 
             packages_to_architectures.setdefault(
                 package["name"] + "=" + version,
@@ -174,6 +187,19 @@ def _translate_dependency_set_impl(rctx):
                     repo_name = repo_name,
                 ),
             )
+
+            # Also add export targets for transitive dependencies.
+            # Without this, foreign symlinks pointing to dependency packages
+            # (e.g. libc6-dev's libm.so symlink -> libc6's libm.so.6) will
+            # have missing targets in the merged directory.
+            for dep_key in package["depends_on"]:
+                if dep_key in export_targets_seen:
+                    continue
+                if dep_key not in packages:
+                    continue
+                export_targets_seen[dep_key] = True
+                dep_repo = util.sanitize(dep_key)
+                export_targets.append("@%s//:export" % dep_repo)
 
     for (_, info) in packages_to_architectures.items():
         package_name = info.name
@@ -219,6 +245,7 @@ def _translate_dependency_set_impl(rctx):
         target_name = util.get_repo_name(rctx.attr.name),
         packages = starlark_codegen_utils.to_dict_list_attr({}),
         architectures = starlark_codegen_utils.to_list_attr(dependency_set["sets"].keys()),
+        export_targets = starlark_codegen_utils.to_list_attr(export_targets),
     ))
 
 translate_dependency_set = repository_rule(
