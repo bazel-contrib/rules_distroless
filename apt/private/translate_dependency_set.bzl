@@ -131,6 +131,21 @@ alias(
 )
 """
 
+def dependency_set_package_selects(packages, dependency_set):
+    """Build select() map of platform -> package labels for hub repo package filegroup."""
+    selects = {}
+    for arch, entries in dependency_set["sets"].items():
+        names = {}
+        for (short_key, version) in entries.items():
+            package_key = short_key + "=" + version
+            if package_key not in packages:
+                fail("illegal state: package %s is not in lockfile" % package_key)
+            names[packages[package_key]["name"]] = True
+
+        selects[arch] = sorted(names.keys())
+
+    return selects
+
 def _translate_dependency_set_impl(rctx):
     package_template = rctx.read(rctx.attr.package_template)
     lockf = lockfile.from_json(rctx, rctx.attr.lock_content)
@@ -139,6 +154,7 @@ def _translate_dependency_set_impl(rctx):
     packages = lockf.packages()
     dependency_sets = lockf.dependency_sets()
     dependency_set = dependency_sets[rctx.attr.depset_name]
+    package_selects = dependency_set_package_selects(packages, dependency_set)
 
     packages_to_architectures = {}
 
@@ -221,7 +237,7 @@ def _translate_dependency_set_impl(rctx):
 
     rctx.file("BUILD.bazel", _ROOT_BUILD_TMPL.format(
         target_name = util.get_repo_name(rctx.attr.name),
-        packages = starlark_codegen_utils.to_dict_list_attr({}),
+        packages = starlark_codegen_utils.to_dict_list_attr(package_selects),
         architectures = starlark_codegen_utils.to_list_attr(dependency_set["sets"].keys()),
     ))
 
