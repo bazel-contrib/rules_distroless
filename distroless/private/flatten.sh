@@ -35,12 +35,13 @@ if [[ "$deduplicate" == "True" ]]; then
     # number of occurrences of each path, and the second pass determines whether each entry is the final (or only)
     # occurrence of that path.
 
-    $bsdtar --confirmation "$@" 2< <("${awk}" '
+    $bsdtar --confirmation -P -s ',^\([^/.]\),./\1,' "$@" 2< <("${awk}" '
     function normalize(p) {
-        # Strip leading "./" and trailing "/" so that "./etc/" and "etc/" are treated as the same path.
-        sub(/^\.\//, "", p)
-        sub(/\/$/, "", p)
-        return p
+        if (p == "") return "/"
+        if (p ~ /^(\/|\.\/)/) {
+            return p
+        }
+        return "./" p
     }
     {
         key = normalize($1)
