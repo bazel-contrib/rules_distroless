@@ -27,13 +27,6 @@ formats other than `.deb`).
 
 # Usage
 
-## Bzlmod (Bazel 6+)
-
-> [!NOTE]
-> If you are using Bazel 6 you need to enable Bzlmod by adding
-> `common --enable_bzlmod` to `.bazelrc` If you are using Bazel 7+
-> [it's enabled by default].
-
 Add the following to your `MODULE.bazel` file:
 
 ```starlark
@@ -58,17 +51,6 @@ git_override(
     commit = "a69bc1949d5daf2d1b0906890667d69b0897688b",
 )
 ```
-
-## `WORKSPACE` (legacy)
-
-> [!WARNING]
-> Bzlmod is replacing the legacy `WORKSPACE` system. The `WORKSPACE` file will
-> be disabled by default in Bazel 8 (late 2024) and will be completely removed
-> in Bazel 9 (late 2025). Please migrate to Bzlmod following the steps in the
-> [Bzlmod migration guide].
-
-You can find the latest release in the [`rules_distroless` Github releases
-page].
 
 # Examples
 

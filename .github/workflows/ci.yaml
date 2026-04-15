@@ -16,10 +16,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Tests are run on Linux using Aspect Workflows on Buildkite.
-  # Just keep a minimal macos footprint to avoid obvious regressions.
   test-macos:
     runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.15.0
+      - run: bazel test //...
+  test-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: bazel-contrib/setup-bazel@0.15.0
