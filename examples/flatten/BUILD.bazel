@@ -120,3 +120,42 @@ examples/flatten/dir/sub/
 examples/flatten/dir/sub/content.txt
 """,
 )
+
+# Flatten with deduplication across mixed path formats ("./etc/" vs "etc/").
+# Tars produced by different tools use inconsistent path prefixes; deduplication
+# must normalize them so the merged layer contains each path only once.
+tar(
+    name = "dotslash_tar",
+    compress = "gzip",
+    mtree = [
+        "./etc/ type=dir uid=0 gid=0 mode=0755 time=0.0",
+        "./etc/sub/ type=dir uid=0 gid=0 mode=0755 time=0.0",
+    ],
+)
+
+tar(
+    name = "nodotslash_tar",
+    compress = "gzip",
+    mtree = [
+        "etc/ type=dir uid=0 gid=0 mode=0755 time=0.0",
+        "etc/sub/ type=dir uid=0 gid=0 mode=0755 time=0.0",
+    ],
+)
+
+flatten(
+    name = "flatten_dedup_normalize",
+    deduplicate = True,
+    tars = [
+        ":dotslash_tar",
+        ":nodotslash_tar",
+    ],
+)
+
+assert_tar_listing(
+    name = "test_flatten_dedup_normalize",
+    actual = "flatten_dedup_normalize",
+    expected = """\
+etc/
+etc/sub/
+""",
+)
