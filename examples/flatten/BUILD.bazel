@@ -146,8 +146,8 @@ flatten(
     name = "flatten_dedup_normalize",
     deduplicate = True,
     tars = [
-        ":dotslash_tar",
         ":nodotslash_tar",
+        ":dotslash_tar",
     ],
 )
 
@@ -155,7 +155,7 @@ assert_tar_listing(
     name = "test_flatten_dedup_normalize",
     actual = "flatten_dedup_normalize",
     expected = """\
-etc/
-etc/sub/
+./etc/
+./etc/sub/
 """,
 )

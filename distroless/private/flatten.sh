@@ -37,9 +37,11 @@ if [[ "$deduplicate" == "True" ]]; then
 
     $bsdtar --confirmation "$@" 2< <("${awk}" '
     function normalize(p) {
-        # Strip leading "./" and trailing "/" so that "./etc/" and "etc/" are treated as the same path.
-        sub(/^\.\//, "", p)
+        # Strip trailing "/" and add leading "./" so that "./etc/" and "etc/" are treated as the same path.
         sub(/\/$/, "", p)
+        if (p !~ /^\.\// && p !~ /^\//) {
+            p = "./" p
+        }
         return p
     }
     {
