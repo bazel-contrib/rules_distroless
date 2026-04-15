@@ -74,7 +74,7 @@ def _is_satisfied_by(va, vb):
     if vb[0] != "=":
         fail("Per https://www.debian.org/doc/debian-policy/ch-relationships.html only = is allowed for Provides field.")
 
-    return _version_relop(va[1], vb[1], va[0])
+    return _version_relop(vb[1], va[1], va[0])
 
 version_constraint = struct(
     relop = _version_relop,

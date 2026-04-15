@@ -6,6 +6,7 @@ load(":version_constraint.bzl", "version_constraint")
 def _resolve_package(state, name, version, arch):
     # First check if the constraint is satisfied by a virtual package
     virtual_packages = state.repository.virtual_packages(name = name, arch = arch)
+    virtual_packages.extend(state.repository.virtual_packages(name = name, arch = "all"))
 
     candidates = [
         package
@@ -33,6 +34,15 @@ def _resolve_package(state, name, version, arch):
             # In the case of required packages, these defaults are not specified.
             if "Priority" in package and package["Priority"] == "required":
                 return package
+
+        # Sometimes they are provided by multiple versions of the same library
+        if len({c["Package"]: None for c in candidates}.keys()) == 1:
+            versions = [c["Version"] for c in candidates]
+            selected_version = 0
+            for i in range(1, len(versions)):
+                if version_constraint.relop(versions[i], versions[selected_version], ">>"):
+                    selected_version = i
+            return candidates[selected_version]
 
         # Otherwise, we can't disambiguate the virtual package providers so
         # choose none and warn.
