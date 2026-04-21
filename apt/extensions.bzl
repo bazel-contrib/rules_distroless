@@ -9,6 +9,73 @@ load("//apt/private:translate_dependency_set.bzl", "translate_dependency_set")
 load("//apt/private:util.bzl", "util")
 load("//apt/private:version_constraint.bzl", "version_constraint")
 
+def _discover_so_targets_for_package(mctx, package, sources):
+    """Discover .so target names for a resolved package."""
+    urls = [
+        uri + "/" + package["filename"]
+        for uri in sources[package["suite"]]["uris"]
+    ]
+    sha256 = package["sha256"]
+    output = "so_discovery_{}.deb".format(sha256[:8])
+    download_result = mctx.download(
+        url = urls,
+        output = output,
+        sha256 = sha256,
+    )
+    if not download_result.success:
+        return []
+
+    # .deb is an ar archive. List its contents to find data.tar.*
+    ar_list = mctx.execute(["ar", "t", output])
+    data_tar_name = None
+    for line in ar_list.stdout.splitlines():
+        if line.startswith("data.tar"):
+            data_tar_name = line
+            break
+
+    if not data_tar_name:
+        mctx.execute(["rm", "-f", output])
+        return []
+
+    # Determine compression type from filename
+    if data_tar_name.endswith(".xz"):
+        tar_flag = "-tJ"
+    elif data_tar_name.endswith(".gz"):
+        tar_flag = "-tz"
+    elif data_tar_name.endswith(".zst"):
+        tar_flag = "--zstd -t"
+    else:
+        tar_flag = "-t"
+
+    # Extract and list data.tar.* contents using ar p | tar -t
+    tar_result = mctx.execute(["sh", "-c", "ar p '{}' '{}' | tar {}".format(output, data_tar_name, tar_flag)])
+    mctx.execute(["rm", "-f", output])
+
+    if tar_result.return_code != 0:
+        return []
+
+    so_files = []
+    for line in tar_result.stdout.splitlines():
+        line = line.strip()
+        if line.endswith("/"):
+            continue
+        if (line.endswith(".so") or line.find(".so.") != -1) and line.find("lib") != -1:
+            if line.find("libthread_db") != -1:
+                continue
+            so_files.append(line)
+
+    # Collect unique target names
+    seen = {}
+    targets = []
+    for so_path in so_files:
+        so_basename = so_path[so_path.rfind("/") + 1:]
+        target_name = util.get_library_base_name(so_basename)
+        if target_name not in seen:
+            seen[target_name] = True
+            targets.append(target_name)
+
+    return targets
+
 # https://wiki.debian.org/SupportedArchitectures
 ALL_SUPPORTED_ARCHES = ["armel", "armhf", "arm64", "i386", "amd64", "mips64el", "ppc64el", "x390x"]
 
@@ -418,6 +485,11 @@ def _distroless_extension(mctx):
             })
             arch_set = dependency_set["sets"].setdefault(arch, {})
             arch_set[pkg_short_key] = package["Version"]
+
+    # Discover .so targets for each package before generating hub repos
+    mctx.report_progress("Discovering shared library targets")
+    for (package_key, package) in glock.packages().items():
+        package["so_targets"] = _discover_so_targets_for_package(mctx, package, sources)
 
     # Generate a hub repo for every dependency set
     lock_content = glock.as_json()

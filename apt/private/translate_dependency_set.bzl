@@ -130,6 +130,14 @@ filegroup(
 {extra}
 '''
 
+_SO_ALIASES_TMPL = """
+alias(
+    name = "{so_target}",
+    actual = select({selects}),
+    visibility = ["//visibility:public"],
+)
+"""
+
 _DEB_CC_IMPORT = """
 alias(
     name = "{target_name}",
@@ -206,13 +214,36 @@ def _translate_dependency_set_impl(rctx):
 
         architectures = info.architectures.keys()
 
+        # Get so_targets from package data (set by extensions.bzl discovery)
+        sample_package_key = info.architectures.values()[0]
+        pkg_data = packages.get(sample_package_key, {})
+        so_targets = pkg_data.get("so_targets", [])
+
+        # Track target names already used to avoid duplicates
+        used_target_names = {}
+
         extra = ""
         if package_name.endswith("-dev"):
             target_name = package_name.removesuffix("-dev")
+            used_target_names[target_name] = True
             extra = _DEB_CC_IMPORT.format(
                 target_name = target_name,
                 selects = starlark_codegen_utils.to_dict_attr({
                     "//:linux_%s" % architecture: "@%s//:%s" % (util.sanitize(package_key), target_name)
+                    for (architecture, package_key) in info.architectures.items()
+                }),
+            )
+
+        # Generate aliases for each .so target, skipping duplicates
+        so_aliases = ""
+        for so_target in so_targets:
+            if so_target in used_target_names:
+                continue
+            used_target_names[so_target] = True
+            so_aliases += _SO_ALIASES_TMPL.format(
+                so_target = so_target,
+                selects = starlark_codegen_utils.to_dict_attr({
+                    "//:linux_%s" % architecture: "@%s//:%s" % (util.sanitize(package_key), so_target)
                     for (architecture, package_key) in info.architectures.items()
                 }),
             )
@@ -233,7 +264,7 @@ def _translate_dependency_set_impl(rctx):
                     "//:linux_%s" % architecture: ["//%s/%s" % (package_name, architecture)]
                     for architecture in architectures
                 }),
-                extra = extra,
+                extra = extra + so_aliases,
                 available_platforms = " ".join([
                     "linux/" + arch
                     for arch in architectures

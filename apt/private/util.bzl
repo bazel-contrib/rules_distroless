@@ -48,6 +48,17 @@ def _warning(rctx, message):
         "\033[0;33mWARNING:\033[0m {}".format(message),
     ], quiet = False)
 
+def _get_library_base_name(so_basename):
+    """Strip lib prefix and .so suffix, e.g. libfoo.so -> foo, libfoo.so.1 -> foo.so.1"""
+    name = so_basename
+    if name.startswith("lib"):
+        name = name[3:]
+    # Remove .so and anything after
+    so_idx = name.find(".so")
+    if so_idx != -1:
+        name = name[:so_idx]
+    return name
+
 util = struct(
     sanitize = _sanitize,
     set_dict = _set_dict,
@@ -55,4 +66,5 @@ util = struct(
     warning = _warning,
     get_repo_name = _get_repo_name,
     is_snapshot_uri = _is_snapshot_uri,
+    get_library_base_name = _get_library_base_name,
 )
