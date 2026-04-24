@@ -139,9 +139,13 @@ apt.install(
 #     ],
 # )
 
+################################################################
 # Example for LLVM Toolchain with hermetic sysroot and libstdc++
+################################################################
 
+# Define the sources for the packages that make up the sysroot
 apt.sources_list(
+    # You may select multiple architectures for different sysroots
     architectures = [
         "amd64",
         "arm64",
@@ -155,6 +159,8 @@ apt.sources_list(
     types = ["deb"],
     uris = ["https://snapshot.ubuntu.com/ubuntu/20260401T000000Z"],
 )
+
+# Specify what packages should be installed in your sysroot
 apt.install(
     dependency_set = "ubuntu24_04_sysroot",
     packages = [
@@ -171,7 +177,9 @@ apt.install(
         "noble-security",
         "noble-updates",
     ],
+    # toolchains_llvm expects a mergedusr layout in the sysroot for the linker to find the libraries
     mergedusr = True,
+    # Creates the package that can be injected into toolchains_llvm as sysroot
     unpack = True,
 )
 use_repo(apt, "bullseye", "ubuntu24_04_sysroot")
@@ -185,28 +193,12 @@ llvm = use_extension(
     dev_dependency = True,
 )
 llvm.toolchain(
-    compile_flags = {"": [
-        "-march=nehalem",
-        "-ffp-model=strict",
-        # Security
-        "-U_FORTIFY_SOURCE",  # https://github.com/google/sanitizers/issues/247
-        "-fstack-protector",
-        "-fno-omit-frame-pointer",
-        # Diagnostics
-        "-fcolor-diagnostics",
-        "-Wno-deprecated-declarations",
-        "-Wno-error=self-assign-overloaded",
-        "-Wthread-safety",
-    ]},
-    cxx_standard = {"": "c++17"},
-    link_libs = {"": [
-        "-lrt",
-        # This is the agreed way to ensure linking for targets using std::atomic operations.
-        "-latomic",
-    ]},
     llvm_version = "19.1.7",
+    # You can now specify the C++ stdlib that is contained in the sysroot above
     stdlib = {"": "stdc++"},
 )
+
+# Specify the sysroot for the matching target
 llvm.sysroot(
     name = "llvm_toolchain",
     label = "@ubuntu24_04_sysroot//unpack_amd64",

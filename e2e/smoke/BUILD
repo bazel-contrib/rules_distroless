@@ -1,5 +1,6 @@
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@container_structure_test//:defs.bzl", "container_structure_test")
+load("@rules_cc//cc:defs.bzl", "cc_test")
 load("@rules_distroless//distroless:defs.bzl", "cacerts", "group", "passwd")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@tar.bzl", "tar")
@@ -129,4 +130,10 @@ container_structure_test(
     }),
     image = ":image_platform",
     target_compatible_with = COMPATIBLE_WITH,
+)
+
+cc_test(
+    name = "test_sysroot",
+    srcs = ["hello_world.cpp"],
+    visibility = ["//visibility:public"],
 )

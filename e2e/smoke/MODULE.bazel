@@ -84,4 +84,72 @@ apt.install(
     ],
 )
 apt.lock(into = ":bullseye.lock.json")
-use_repo(apt, "bullseye")
+
+apt.sources_list(
+    # You may select multiple architectures for different sysroots
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = [
+        "noble",
+        "noble-security",
+        "noble-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot.ubuntu.com/ubuntu/20260401T000000Z"],
+)
+
+# Specify what packages should be installed in your sysroot
+apt.install(
+    dependency_set = "ubuntu24_04_sysroot",
+    packages = [
+        "libc6", # Core C/POSIX
+        "libc6-dev",  # Core C/POSIX
+        "linux-libc-dev",  # Core C/POSIX
+        "libstdc++6", # C++ standard library runtime
+        "libstdc++-13-dev", # C++ standard library headers
+        "libgcc-s1", # Exception unwinding
+        "libatomic1", # Non-lock-free atomics support
+    ],
+    suites = [
+        "noble",
+        "noble-security",
+        "noble-updates",
+    ],
+    # toolchains_llvm expects a mergedusr layout in the sysroot for the linker to find the libraries
+    mergedusr = True,
+    # Creates the package that can be injected into toolchains_llvm as sysroot
+    unpack = True,
+)
+apt.lock(into = ":ubuntu24_04_sysroot.lock.json")
+use_repo(apt, "bullseye", "ubuntu24_04_sysroot")
+
+bazel_dep(name = "rules_cc", version = "0.1.5")
+bazel_dep(name = "toolchains_llvm", version = "1.7.0", dev_dependency = True)
+
+llvm = use_extension(
+    "@toolchains_llvm//toolchain/extensions:llvm.bzl",
+    "llvm",
+    dev_dependency = True,
+)
+llvm.toolchain(
+    llvm_version = "19.1.7",
+    # You can now specify the C++ stdlib that is contained in the sysroot above
+    stdlib = {"": "stdc++"},
+)
+
+# Specify the sysroot for the matching target
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@ubuntu24_04_sysroot//unpack_amd64",
+    targets = ["linux-x86_64"],
+)
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@ubuntu24_04_sysroot//unpack_arm64",
+    targets = ["linux-aarch64"],
+)
+use_repo(llvm, "llvm_toolchain")
+register_toolchains("@llvm_toolchain//:cc-toolchain-x86_64-linux", dev_dependency=True)
