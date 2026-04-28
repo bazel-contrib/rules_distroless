@@ -139,4 +139,83 @@ apt.install(
 #     ],
 # )
 
-use_repo(apt, "bullseye")
+# Example for LLVM Toolchain with hermetic sysroot and libstdc++
+
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = [
+        "noble",
+        "noble-security",
+        "noble-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot.ubuntu.com/ubuntu/20260401T000000Z"],
+)
+apt.install(
+    dependency_set = "ubuntu24_04_sysroot",
+    packages = [
+        "libc6", # Core C/POSIX
+        "libc6-dev",  # Core C/POSIX
+        "linux-libc-dev",  # Core C/POSIX
+        "libstdc++6", # C++ standard library runtime
+        "libstdc++-13-dev", # C++ standard library headers
+        "libgcc-s1", # Exception unwinding
+        "libatomic1", # Non-lock-free atomics support
+    ],
+    suites = [
+        "noble",
+        "noble-security",
+        "noble-updates",
+    ],
+    mergedusr = True,
+    unpack = True,
+)
+use_repo(apt, "bullseye", "ubuntu24_04_sysroot")
+
+bazel_dep(name = "rules_cc", version = "0.1.5")
+bazel_dep(name = "toolchains_llvm", version = "1.7.0", dev_dependency = True)
+
+llvm = use_extension(
+    "@toolchains_llvm//toolchain/extensions:llvm.bzl",
+    "llvm",
+    dev_dependency = True,
+)
+llvm.toolchain(
+    compile_flags = {"": [
+        "-march=nehalem",
+        "-ffp-model=strict",
+        # Security
+        "-U_FORTIFY_SOURCE",  # https://github.com/google/sanitizers/issues/247
+        "-fstack-protector",
+        "-fno-omit-frame-pointer",
+        # Diagnostics
+        "-fcolor-diagnostics",
+        "-Wno-deprecated-declarations",
+        "-Wno-error=self-assign-overloaded",
+        "-Wthread-safety",
+    ]},
+    cxx_standard = {"": "c++17"},
+    link_libs = {"": [
+        "-lrt",
+        # This is the agreed way to ensure linking for targets using std::atomic operations.
+        "-latomic",
+    ]},
+    llvm_version = "19.1.7",
+    stdlib = {"": "stdc++"},
+)
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@ubuntu24_04_sysroot//unpack_amd64",
+    targets = ["linux-x86_64"],
+)
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@ubuntu24_04_sysroot//unpack_arm64",
+    targets = ["linux-aarch64"],
+)
+use_repo(llvm, "llvm_toolchain")
+register_toolchains("@llvm_toolchain//:cc-toolchain-x86_64-linux", dev_dependency=True)

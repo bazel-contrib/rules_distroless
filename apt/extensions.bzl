@@ -299,9 +299,20 @@ def _distroless_extension(mctx):
 
     resolution_queue = []
     already_resolved = {}
+    dependency_set_unpack = {}
+    dependency_set_mergedusr = {}
+    mergedusr_enabled = False
 
     for mod in mctx.modules:
         for install in mod.tags.install:
+            if install.dependency_set:
+                current = dependency_set_unpack.get(install.dependency_set, False)
+                dependency_set_unpack[install.dependency_set] = current or install.unpack
+                current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
+                dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
+
+            mergedusr_enabled = mergedusr_enabled or install.mergedusr
+
             for dep_constraint in install.packages:
                 constraint = version_constraint.parse_dep(dep_constraint)
                 architectures = constraint["arch"]
@@ -426,6 +437,8 @@ def _distroless_extension(mctx):
             name = depset_name,
             depset_name = depset_name,
             lock_content = lock_content,
+            unpack = dependency_set_unpack.get(depset_name, False),
+            mergedusr = dependency_set_mergedusr.get(depset_name, False),
         )
 
     # Generate a repo per package which will be aliased by hub repo.
@@ -446,7 +459,7 @@ def _distroless_extension(mctx):
                 for uri in sources[package["suite"]]["uris"]
             ],
             sha256 = package["sha256"],
-            mergedusr = False,
+            mergedusr = mergedusr_enabled,
             depends_on = package["depends_on"],
             depends_file_map = json.encode(filemap),
             package_name = package["name"],
@@ -587,6 +600,8 @@ install = tag_class(
         "dependency_set": attr.string(),
         "suites": attr.string_list(),
         "include_transitive": attr.bool(default = True),
+        "unpack": attr.bool(default = False),
+        "mergedusr": attr.bool(default = False),
     },
 )
 
