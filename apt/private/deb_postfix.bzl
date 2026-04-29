@@ -35,6 +35,28 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     if mergedusr:
         toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"]
         apply = """\
+            repeat_confirmation() {
+                local answer="$$1"
+
+                for ((j = 0; j < 31; j++)); do
+                    printf '%s' "$$answer"
+                done
+            }
+
+            answers_file=$$(mktemp)
+            trap 'rm -f "$$answers_file"' EXIT
+
+            while IFS= read -r path; do
+                keep="y"
+                case "$$path" in
+                    ./bin/|./sbin/|./lib/|./lib32/|./lib64/|./libx32/)
+                        keep="n"
+                    ;;
+                esac
+
+                repeat_confirmation "$$keep"
+            done > "$$answers_file" < <($(BSDTAR_BIN) -tf "$$data_file")
+
             $(BSDTAR_BIN) --confirmation --gzip --options 'gzip:!timestamp' -cf "$$layer" \
             -s "#^\\./bin/\\(.\\)#./usr/bin/\\1#" \
             -s "#^\\./sbin/\\(.\\)#./usr/sbin/\\1#" \
@@ -42,24 +64,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
             -s "#^\\./lib32/\\(.\\)#./usr/lib32/\\1#" \
             -s "#^\\./lib64/\\(.\\)#./usr/lib64/\\1#" \
             -s "#^\\./libx32/\\(.\\)#./usr/libx32/\\1#" \
-            "@$$data_file" 2< <(
-                $(BSDTAR_BIN) -tvf "$$data_file" | $(location @gawk//:gawk) '{
-                    ORS=""
-                    keep="y"
-                    if (substr($$1, 1, 1) == "d" && (\\
-                            $$9 == "./bin/" ||\\
-                            $$9 == "./sbin/" ||\\
-                            $$9 == "./lib/" ||\\
-                            $$9 == "./lib32/" ||\\
-                            $$9 == "./lib64/" ||\\
-                            $$9 == "./libx32/" \\
-                        )) {
-                        keep="n"
-                    }
-                    for (j=0; j<31; j++) print keep
-                    fflush()
-                }'
-            )
+            "@$$data_file" 2< "$$answers_file"
         """
 
     native.genrule(
@@ -91,6 +96,5 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
         %s
         """ % apply,
         toolchains = toolchains,
-        tools = ["@gawk//:gawk"],
         **kwargs
     )

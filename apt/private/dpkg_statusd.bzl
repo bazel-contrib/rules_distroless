@@ -17,7 +17,6 @@ def _dpkg_statusd_impl(ctx):
     args.add(output)
     args.add(ctx.file.control)
     args.add(ctx.attr.package_name)
-    args.add(ctx.executable._gawk.path)
     args.add(coreutils.coreutils_info.bin)
     tar_lib.common.add_compression_args(ctx.attr.compression, args)
 
@@ -27,7 +26,6 @@ def _dpkg_statusd_impl(ctx):
         outputs = [output],
         tools = [
             bsdtar.default.files,
-            ctx.executable._gawk,
             coreutils.default.files,
         ],
         arguments = [args],
@@ -54,12 +52,6 @@ dpkg_statusd = rule(
         "compression": attr.string(
             doc = "Compress the archive file with a supported algorithm.",
             values = tar_lib.common.accepted_compression_types,
-        ),
-        "_gawk": attr.label(
-            allow_single_file = True,
-            executable = True,
-            cfg = "exec",
-            default = "@gawk//:gawk",
         ),
     },
     implementation = _dpkg_statusd_impl,

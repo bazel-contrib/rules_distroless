@@ -14,7 +14,6 @@ def _dpkg_status_impl(ctx):
     args = ctx.actions.args()
     args.add(bsdtar.tarinfo.binary)
     args.add(output)
-    args.add(ctx.executable._gawk.path)
     args.add(coreutils.coreutils_info.bin)
     args.add_all(ctx.files.controls)
 
@@ -24,7 +23,6 @@ def _dpkg_status_impl(ctx):
         outputs = [output],
         tools = [
             bsdtar.default.files,
-            ctx.executable._gawk,
             coreutils.default.files,
         ],
         arguments = [args],
@@ -46,12 +44,6 @@ dpkg_status = rule(
         "controls": attr.label_list(
             allow_files = [".tar.zst", ".tar.xz", ".tar.gz", ".tar"],
             mandatory = True,
-        ),
-        "_gawk": attr.label(
-            allow_single_file = True,
-            executable = True,
-            cfg = "exec",
-            default = "@gawk//:gawk",
         ),
     },
     implementation = _dpkg_status_impl,

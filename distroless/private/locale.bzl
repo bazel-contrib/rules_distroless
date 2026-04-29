@@ -40,7 +40,6 @@ def _locale_impl(ctx):
     args.add(ctx.file.package)
     args.add(ctx.attr.time)
     args.add(coreutils.coreutils_info.bin)
-    args.add(ctx.executable._gawk)
     args.add("--include", "^./usr/$")
     args.add("--include", "^./usr/lib/$")
     args.add("--include", "^./usr/lib/locale/$")
@@ -57,7 +56,6 @@ def _locale_impl(ctx):
         tools = [
             bsdtar.default.files,
             coreutils.default.files,
-            ctx.executable._gawk,
         ],
         arguments = [args],
     )
@@ -84,12 +82,6 @@ locale = rule(
         "time": attr.string(
             doc = "time for the entries",
             default = "0.0",
-        ),
-        "_gawk": attr.label(
-            allow_single_file = True,
-            executable = True,
-            cfg = "exec",
-            default = "@gawk//:gawk",
         ),
     },
     implementation = _locale_impl,

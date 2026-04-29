@@ -6,8 +6,7 @@ readonly out="$2"
 readonly package_path="$3"
 readonly time="$4"
 readonly coreutils="$5"
-readonly awk="$6"
-shift 6
+shift 5
 
 # TODO: there must be a better way to manipulate tars!
 # "$bsdtar" -cf  $out --posix --no-same-owner --options="" $@ "@$package_path"
@@ -17,5 +16,7 @@ shift 6
 tmp=$($coreutils mktemp -d)
 "$bsdtar" -xf "$package_path" $@ -C "$tmp"
 "$bsdtar" -cf - $@ --format=mtree --options '!gname,!uname,!sha1,!nlink,!time' "@$package_path" |
-    $awk '{ print $0 " time='"$time"'" }' |
+    while IFS= read -r line; do
+        printf '%s time=%s\n' "$line" "$time"
+    done |
     "$bsdtar" --gzip --options 'gzip:!timestamp' -cf "$out" -C "$tmp/" @-
