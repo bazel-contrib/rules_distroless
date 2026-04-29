@@ -14,6 +14,27 @@ ALL_SUPPORTED_ARCHES = ["armel", "armhf", "arm64", "i386", "amd64", "mips64el", 
 
 ITERATION_MAX = 2147483646
 
+def _bsdtar_label(mctx):
+    """Returns the Label for the bsdtar binary matching the host platform."""
+    os = mctx.os.name.lower()
+    arch = mctx.os.arch.lower()
+
+    if "linux" in os:
+        os_name = "linux"
+    elif "mac" in os or "darwin" in os:
+        os_name = "darwin"
+    elif "windows" in os:
+        os_name = "windows"
+    else:
+        fail("Unsupported OS for mergedusr unpack: {}".format(mctx.os.name))
+
+    if "aarch64" in arch or "arm64" in arch:
+        cpu = "arm64"
+    else:
+        cpu = "amd64"
+
+    return Label("@bsd_tar_toolchains_{}_{}//:tar".format(os_name, cpu))
+
 def _parse_source(src):
     parts = src.split(" ")
     kind = parts.pop(0)
@@ -433,12 +454,15 @@ def _distroless_extension(mctx):
     # Generate a hub repo for every dependency set
     lock_content = glock.as_json()
     for depset_name in dependency_sets.keys():
+        depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
+        depset_unpack = dependency_set_unpack.get(depset_name, False)
         translate_dependency_set(
             name = depset_name,
             depset_name = depset_name,
             lock_content = lock_content,
-            unpack = dependency_set_unpack.get(depset_name, False),
-            mergedusr = dependency_set_mergedusr.get(depset_name, False),
+            unpack = depset_unpack,
+            mergedusr = depset_mergedusr,
+            bsdtar = _bsdtar_label(mctx) if depset_unpack and depset_mergedusr else None,
         )
 
     # Generate a repo per package which will be aliased by hub repo.

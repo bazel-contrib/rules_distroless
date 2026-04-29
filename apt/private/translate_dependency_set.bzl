@@ -9,6 +9,7 @@ _ROOT_BUILD_TMPL = """\
 
 load("@rules_distroless//apt:defs.bzl", "dpkg_status")
 load("@rules_distroless//distroless:defs.bzl", "flatten")
+{tar_load}
 
 exports_files(['packages.bzl'])
 
@@ -80,12 +81,30 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+{mergedusr_compat}
+
 flatten(
     name = "flat",
     tars = [
         "{target_name}",
+        {flat_extra_tars}
     ],
     deduplicate = True,
+    visibility = ["//visibility:public"],
+)
+"""
+
+_MERGEDUSR_COMPAT_TMPL = """\
+tar(
+    name = "mergedusr_compat",
+    mtree = [
+        "./bin type=link link=usr/bin",
+        "./sbin type=link link=usr/sbin",
+        "./lib type=link link=usr/lib",
+        "./lib32 type=link link=usr/lib32",
+        "./lib64 type=link link=usr/lib64",
+        "./libx32 type=link link=usr/libx32",
+    ],
     visibility = ["//visibility:public"],
 )
 """
@@ -206,11 +225,11 @@ def _ensure_mergedusr_compat_symlinks(rctx, unpack_dir):
 
         rctx.symlink(target_path, root_path)
 
-def _materialize_deb_data_into_root(rctx, deb_path, work_dir, unpack_dir):
-    extraction = rctx.execute([
-        "bash",
-        "-c",
-        """set -o errexit -o nounset -o pipefail
+def _materialize_deb_data_into_root(rctx, deb_path, work_dir, unpack_dir, bsdtar = None):
+    # Part 1: unpack the data member from the .deb archive.
+    # Uses .format() for Starlark-level substitutions only; the bash code here
+    # contains no { } function braces so no doubling is necessary.
+    setup_sh = """set -o errexit -o nounset -o pipefail
 pkg='{pkg}'
 work='{work}'
 root='{root}'
@@ -232,12 +251,32 @@ fi
 
 data_archive="$work/$member"
 ar p "$pkg" "$member" > "$data_archive"
-tar --extract --file "$data_archive" --directory "$root" --no-same-owner --no-same-permissions
 """.format(
-            pkg = deb_path,
-            work = work_dir,
-            root = str(rctx.path(unpack_dir)),
-        ),
+        pkg = deb_path,
+        work = work_dir,
+        root = str(rctx.path(unpack_dir)),
+    )
+
+    # Part 2: extract into the root, optionally normalising merged-/usr paths.
+    # String concatenation (not .format()) is used here to avoid conflicts with
+    # the bash function braces {{ }} produced by util.mergedusr_rewrite_script.
+    if bsdtar != None:
+        # Run the shared bsdtar rewrite script (same logic as deb_postfix) to
+        # produce a normalised .tar.gz, then extract that into the root.
+        extract_sh = (
+            'data_file="$data_archive"\n' +
+            'layer="$work/content.tar.gz"\n\n' +
+            util.mergedusr_rewrite_script(str(bsdtar), dollar = "$") + "\n\n" +
+            "tar --extract --file \"$layer\" --directory \"$root\" --no-same-owner --no-same-permissions\n" +
+            'rm -f "$layer"\n'
+        )
+    else:
+        extract_sh = "tar --extract --file \"$data_archive\" --directory \"$root\" --no-same-owner --no-same-permissions\n"
+
+    extraction = rctx.execute([
+        "bash",
+        "-c",
+        setup_sh + extract_sh,
     ])
     if extraction.return_code != 0:
         fail("Failed extracting deb payload from {}:\n{}\n{}".format(deb_path, extraction.stdout, extraction.stderr))
@@ -250,6 +289,15 @@ def _unpack(rctx, packages, dependency_set, sources, mergedusr):
     ]
     if not concrete_arches:
         fail("unpack requires at least one concrete target architecture")
+
+    bsdtar = None
+    if mergedusr:
+        if not rctx.attr.bsdtar:
+            fail(
+                "bsdtar is required for mergedusr unpacking but was not provided. " +
+                "This is an internal error; please file a bug.",
+            )
+        bsdtar = rctx.path(rctx.attr.bsdtar)
 
     for architecture in concrete_arches:
         unpack_dir = "unpack_%s" % architecture
@@ -272,7 +320,7 @@ def _unpack(rctx, packages, dependency_set, sources, mergedusr):
                 ],
             )
 
-            _materialize_deb_data_into_root(rctx, deb_path, work_dir, unpack_dir)
+            _materialize_deb_data_into_root(rctx, deb_path, work_dir, unpack_dir, bsdtar = bsdtar)
 
         if mergedusr:
             _ensure_mergedusr_compat_symlinks(rctx, unpack_dir)
@@ -389,6 +437,9 @@ def _translate_dependency_set_impl(rctx):
         target_name = util.get_repo_name(rctx.attr.name),
         packages = starlark_codegen_utils.to_dict_list_attr(package_selects),
         architectures = starlark_codegen_utils.to_list_attr(dependency_set["sets"].keys()),
+        tar_load = 'load("@tar.bzl", "tar")' if rctx.attr.mergedusr else "",
+        mergedusr_compat = _MERGEDUSR_COMPAT_TMPL if rctx.attr.mergedusr else "",
+        flat_extra_tars = '":mergedusr_compat",' if rctx.attr.mergedusr else "",
     ))
 
 translate_dependency_set = repository_rule(
@@ -398,6 +449,7 @@ translate_dependency_set = repository_rule(
         "lock_content": attr.string(doc = "INTERNAL: DO NOT USE"),
         "unpack": attr.bool(default = False, doc = "INTERNAL: Whether to expose repository-time unpacked archives via //unpack_<debian_arch>."),
         "mergedusr": attr.bool(default = False, doc = "INTERNAL: Whether package layers were normalized with merged-/usr semantics."),
+        "bsdtar": attr.label(default = None, allow_single_file = True, doc = "INTERNAL: bsdtar binary from bsd_tar_toolchains, required when mergedusr=True and unpack=True."),
         "package_template": attr.label(default = "//apt/private:package.BUILD.tmpl"),
     },
 )

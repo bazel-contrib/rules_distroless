@@ -73,6 +73,13 @@ bzl_library(
 )
 
 bzl_library(
+    name = "deb_postfix",
+    srcs = ["deb_postfix.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = ["@tar.bzl//tar:tar"],
+)
+
+bzl_library(
     name = "version_constraint",
     srcs = ["version_constraint.bzl"],
     visibility = ["//apt:__subpackages__"],
@@ -96,6 +103,7 @@ bzl_library(
     srcs = ["translate_dependency_set.bzl"],
     visibility = ["//apt:__subpackages__"],
     deps = [
+        ":deb_postfix",
         ":lockfile",
         ":starlark_codegen_utils",
         ":util",

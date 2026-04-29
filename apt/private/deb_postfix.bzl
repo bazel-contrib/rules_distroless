@@ -1,5 +1,7 @@
 "normalization rules"
 
+load(":util.bzl", "util")
+
 # buildifier: disable=function-docstring-args
 def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     """Private. DO NOT USE."""
@@ -34,38 +36,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     # https://salsa.debian.org/md/usrmerge/-/tree/master/debian?ref_type=heads
     if mergedusr:
         toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"]
-        apply = """\
-            repeat_confirmation() {
-                local answer="$$1"
-
-                for ((j = 0; j < 31; j++)); do
-                    printf '%s' "$$answer"
-                done
-            }
-
-            answers_file=$$(mktemp)
-            trap 'rm -f "$$answers_file"' EXIT
-
-            while IFS= read -r path; do
-                keep="y"
-                case "$$path" in
-                    ./bin/|./sbin/|./lib/|./lib32/|./lib64/|./libx32/)
-                        keep="n"
-                    ;;
-                esac
-
-                repeat_confirmation "$$keep"
-            done > "$$answers_file" < <($(BSDTAR_BIN) -tf "$$data_file")
-
-            $(BSDTAR_BIN) --confirmation --gzip --options 'gzip:!timestamp' -cf "$$layer" \
-            -s "#^\\./bin/\\(.\\)#./usr/bin/\\1#" \
-            -s "#^\\./sbin/\\(.\\)#./usr/sbin/\\1#" \
-            -s "#^\\./lib/\\(.\\)#./usr/lib/\\1#" \
-            -s "#^\\./lib32/\\(.\\)#./usr/lib32/\\1#" \
-            -s "#^\\./lib64/\\(.\\)#./usr/lib64/\\1#" \
-            -s "#^\\./libx32/\\(.\\)#./usr/libx32/\\1#" \
-            "@$$data_file" 2< "$$answers_file"
-        """
+        apply = util.mergedusr_rewrite_script("$(BSDTAR_BIN)", dollar = "$$")
 
     native.genrule(
         name = name,
