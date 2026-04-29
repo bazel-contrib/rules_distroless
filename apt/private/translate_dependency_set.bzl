@@ -55,7 +55,7 @@ _PACKAGES = {packages}
 dpkg_status(
     name = "dpkg_status",
     controls = select({{
-        "//:linux_%s" % arch: ["//%s:control" % package for package in packages]
+        "//:linux_%s" % arch: ["//%s/%s:control" % (package, arch) for package in packages]
         for arch, packages in _PACKAGES.items()
     }}) if _PACKAGES else {{}},
     visibility = ["//visibility:public"],
@@ -64,7 +64,7 @@ dpkg_status(
 filegroup(
     name = "packages",
     srcs = select({{
-        "//:linux_%s" % arch: ["//%s" % package for package in packages]
+        "//:linux_%s" % arch: ["//%s/%s" % (package, arch) for package in packages]
         for arch, packages in _PACKAGES.items()
     }}) if _PACKAGES else {{}},
     visibility = ["//visibility:public"],
@@ -132,6 +132,21 @@ alias(
 )
 """
 
+# Computes the `@repo//:data` labels a package's per-architecture BUILD.bazel
+# should depend on for the given architecture.
+#
+# Avoids mixing architectures: a dependency is only included if it was built
+# for this exact architecture, or is architecture-independent ("all"). Without
+# this scoping, a package's `depends_on` (which spans every architecture the
+# lockfile knows about) would leak foreign-architecture deps into a single
+# architecture's target, causing file duplication that confuses `flatten`.
+def package_deps_for_architecture(packages, package, architecture):
+    return [
+        "@" + util.sanitize(dep_key) + "//:data"
+        for dep_key in package["depends_on"]
+        if packages[dep_key]["architecture"] in [architecture, "all"]
+    ]
+
 def _translate_dependency_set_impl(rctx):
     package_template = rctx.read(rctx.attr.package_template)
     lockf = lockfile.from_json(rctx, rctx.attr.lock_content)
@@ -192,7 +207,7 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
                     data_targets = '"@%s//:data"' % repo_name,
                     control_targets = '"@%s//:control"' % repo_name,
                     src = '"@%s//:data"' % repo_name,
-                    deps = ["@" + util.sanitize(dep_key) for dep_key in package["depends_on"]],
+                    deps = package_deps_for_architecture(packages, package, architecture),
                     urls = [
                         uri + "/" + package["filename"]
                         for uri in sources[package["suite"]]["uris"]

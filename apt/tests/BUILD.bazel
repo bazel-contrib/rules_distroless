@@ -1,6 +1,7 @@
 load(":facts_test.bzl", "facts_tests")
 load(":linker_script_test.bzl", "linker_script_tests")
 load(":resolution_test.bzl", "resolution_tests")
+load(":translate_dependency_set_test.bzl", "translate_dependency_set_tests")
 load(":version_test.bzl", "version_tests")
 
 version_tests()
@@ -10,3 +11,5 @@ resolution_tests()
 facts_tests()
 
 linker_script_tests()
+
+translate_dependency_set_tests()
