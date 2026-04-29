@@ -1,4 +1,6 @@
 load("@bazel_lib//:bzl_library.bzl", "bzl_library")
+load(":flatten_test.bzl", "flatten_tests")
+load(":locale_test.bzl", "locale_tests")
 
 bzl_library(
     name = "asserts",
@@ -9,3 +11,7 @@ bzl_library(
         "@bazel_skylib//rules:write_file",
     ],
 )
+
+flatten_tests()
+
+locale_tests()
