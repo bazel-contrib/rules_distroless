@@ -16,7 +16,7 @@ bazel_dep(name = "bazel_lib", version = "3.0.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "rules_oci", version = "2.0.0")
 bazel_dep(name = "rules_java", version = "9.1.0")
-bazel_dep(name = "container_structure_test", version = "1.16.0")
+bazel_dep(name = "container_structure_test", version = "1.19.1")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "tar.bzl", version = "0.10.7")
 
@@ -59,7 +59,10 @@ apt.sources_list(
         "amd64",
         "arm64",
     ],
-    components = ["main"],
+    components = [
+        "main",
+        "contrib",
+    ],
     suites = [
         "bullseye",
         "bullseye-updates",
@@ -99,12 +102,15 @@ apt.sources_list(
 apt.install(
     dependency_set = "bullseye",
     packages = [
+        "apt",
         "bash",
         "ca-certificates",
         "coreutils",
         "dpkg",
         "libncurses6",
         "ncurses-base",
+        "nvidia-kernel-common",
+        "perl",
         "tzdata",
     ],
     suites = [
