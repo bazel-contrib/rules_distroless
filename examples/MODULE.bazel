@@ -68,7 +68,24 @@ apt.sources_list(
         "bullseye-updates",
     ],
     types = ["deb"],
-    uris = ["https://snapshot.debian.org/archive/debian/20240901T024950Z"],
+    uris = [
+        "https://snapshot-cloudflare.debian.org/archive/debian/20240210T223313Z",
+        "https://snapshot.debian.org/archive/debian/20240210T223313Z",
+    ],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = [
+        "main",
+    ],
+    suites = [
+        "bullseye-updates",
+    ],
+    types = ["deb"],
+    uris = ["https://snapshot-cloudflare.debian.org/archive/debian/20240210T223313Z/"],
 )
 apt.sources_list(
     architectures = [
@@ -78,7 +95,17 @@ apt.sources_list(
     components = ["main"],
     suites = ["bullseye-security"],
     types = ["deb"],
-    uris = ["https://snapshot.debian.org/archive/debian-security/20240901T024950Z"],
+    uris = ["https://snapshot-cloudflare.debian.org/archive/debian-security/20240210T223313Z"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["cloud-sdk"],
+    types = ["deb"],
+    uris = ["https://packages.cloud.google.com/apt"],
 )
 
 # Ubuntu Noble sources (for ubuntu_snapshot example)
@@ -102,21 +129,25 @@ apt.sources_list(
 apt.install(
     dependency_set = "bullseye",
     packages = [
-        "apt",
-        "bash",
-        "ca-certificates",
+        "ncurses-base",
+        "libncurses6",
+        "tzdata",
         "coreutils",
         "dpkg",
-        "libncurses6",
-        "ncurses-base",
-        "nvidia-kernel-common",
+        "apt",
         "perl",
-        "tzdata",
+        "ca-certificates",
+        "nvidia-kernel-common",
+        "bash",
+        "nginx-full",
+        "nginx-core",
+        "google-cloud-cli"
     ],
     suites = [
         "bullseye",
         "bullseye-updates",
         "bullseye-security",
+        "cloud-sdk",
     ],
 )
 
