@@ -25,6 +25,12 @@ def _get_dict(struct, keys = [], default_value = None):
 def _sanitize(str):
     return str.removeprefix("/").replace("+", "-").replace(":", "-").replace("~", "_").replace("/", "_").replace("=", "_")
 
+def _package_repo_name(package_key, mergedusr = False):
+    repo_name = _sanitize(package_key)
+    if mergedusr:
+        return repo_name + "_mergedusr"
+    return repo_name
+
 def _get_repo_name(st):
     if st.find("+") != -1:
         return st.split("+")[-1]
@@ -105,6 +111,7 @@ def _mergedusr_rewrite_script(bsdtar_bin, dollar = "$"):
 
 util = struct(
     sanitize = _sanitize,
+    package_repo_name = _package_repo_name,
     set_dict = _set_dict,
     get_dict = _get_dict,
     warning = _warning,

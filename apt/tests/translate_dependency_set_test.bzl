@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//apt/private:translate_dependency_set.bzl", "dependency_set_package_selects")
+load("//apt/private:util.bzl", "util")
 
 _TEST_SUITE_PREFIX = "translate_dependency_set/"
 
@@ -71,6 +72,19 @@ def _deduplicate_package_names_test(ctx):
 
 deduplicate_package_names_test = unittest.make(_deduplicate_package_names_test)
 
+def _package_repo_name_modes_test(ctx):
+    env = unittest.begin(ctx)
+
+    package_key = "/bullseye/bash:amd64=5.1"
+
+    asserts.equals(env, "bullseye_bash-amd64_5.1", util.package_repo_name(package_key))
+    asserts.equals(env, "bullseye_bash-amd64_5.1_mergedusr", util.package_repo_name(package_key, mergedusr = True))
+
+    return unittest.end(env)
+
+package_repo_name_modes_test = unittest.make(_package_repo_name_modes_test)
+
 def translate_dependency_set_tests():
     package_selects_test(name = _TEST_SUITE_PREFIX + "package_selects")
     deduplicate_package_names_test(name = _TEST_SUITE_PREFIX + "deduplicate_package_names")
+    package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")

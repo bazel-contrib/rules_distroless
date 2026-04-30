@@ -253,6 +253,34 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
         else:
             formats[cnt_fk] = "unavailable"
 
+def _package_repo_modes(packages, roots_by_mode):
+    modes = {}
+
+    for (mergedusr, roots) in roots_by_mode.items():
+        pending = roots.keys()
+        seen = {}
+
+        for _ in range(len(packages)):
+            if not pending:
+                break
+
+            current = pending
+            pending = []
+            for package_key in current:
+                if package_key in seen:
+                    continue
+                if package_key not in packages:
+                    fail("illegal state: package %s is not in lockfile" % package_key)
+
+                seen[package_key] = True
+                modes.setdefault(package_key, {})[mergedusr] = True
+                pending.extend(packages[package_key]["depends_on"])
+
+        if pending:
+            fail("dependency traversal for package repository generation did not converge")
+
+    return modes
+
 def _distroless_extension(mctx):
     root_direct_deps = []
     root_direct_dev_deps = []
@@ -322,7 +350,10 @@ def _distroless_extension(mctx):
     already_resolved = {}
     dependency_set_unpack = {}
     dependency_set_mergedusr = {}
-    mergedusr_enabled = False
+    package_repo_roots = {
+        False: {},
+        True: {},
+    }
 
     for mod in mctx.modules:
         for install in mod.tags.install:
@@ -331,8 +362,6 @@ def _distroless_extension(mctx):
                 dependency_set_unpack[install.dependency_set] = current or install.unpack
                 current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
                 dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
-
-            mergedusr_enabled = mergedusr_enabled or install.mergedusr
 
             for dep_constraint in install.packages:
                 constraint = version_constraint.parse_dep(dep_constraint)
@@ -362,6 +391,8 @@ def _distroless_extension(mctx):
                             constraint["version"],
                             "amd64",
                             install.suites,
+                            install.mergedusr,
+                            True,
                         ))
                         continue
 
@@ -375,6 +406,8 @@ def _distroless_extension(mctx):
                         constraint["version"],
                         arch,
                         install.suites,
+                        install.mergedusr,
+                        True,
                     ))
 
     for i in range(0, ITERATION_MAX + 1):
@@ -383,7 +416,7 @@ def _distroless_extension(mctx):
         if i == ITERATION_MAX:
             fail("apt.install exhausted, please file a bug")
 
-        (dependency_set_name, name, version, arch, suites) = resolution_queue.pop()
+        (dependency_set_name, name, version, arch, suites, mergedusr, is_root) = resolution_queue.pop()
 
         mctx.report_progress("Resolving %s:%s" % (name, arch))
 
@@ -426,6 +459,10 @@ def _distroless_extension(mctx):
         #  3- 1) is enforced even if 2) is the case.
         glock.add_package(package)
 
+        package_key = lockfile.package_key(package)
+        if is_root:
+            package_repo_roots[mergedusr][package_key] = True
+
         pkg_short_key = lockfile.short_package_key(package)
 
         already_resolved[pkg_short_key] = True
@@ -440,6 +477,8 @@ def _distroless_extension(mctx):
                     ("=", dep["Version"]),
                     arch,
                     suites,
+                    mergedusr,
+                    False,
                 ))
             glock.add_package_dependency(package, dep)
 
@@ -453,6 +492,7 @@ def _distroless_extension(mctx):
 
     # Generate a hub repo for every dependency set
     lock_content = glock.as_json()
+    package_repo_modes = _package_repo_modes(glock.packages(), package_repo_roots)
     for depset_name in dependency_sets.keys():
         depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
         depset_unpack = dependency_set_unpack.get(depset_name, False)
@@ -475,19 +515,25 @@ def _distroless_extension(mctx):
                 arch = arch,
             )
 
-        deb_import(
-            name = util.sanitize(package_key),
-            target_name = util.sanitize(package_key),
-            urls = [
-                uri + "/" + package["filename"]
-                for uri in sources[package["suite"]]["uris"]
-            ],
-            sha256 = package["sha256"],
-            mergedusr = mergedusr_enabled,
-            depends_on = package["depends_on"],
-            depends_file_map = json.encode(filemap),
-            package_name = package["name"],
-        )
+        modes = package_repo_modes.get(package_key, {False: True})
+        repo_variants = [(util.package_repo_name(package_key), False if False in modes else True)]
+        if True in modes:
+            repo_variants.append((util.package_repo_name(package_key, mergedusr = True), True))
+
+        for (repo_name, mergedusr) in repo_variants:
+            deb_import(
+                name = repo_name,
+                target_name = repo_name,
+                urls = [
+                    uri + "/" + package["filename"]
+                    for uri in sources[package["suite"]]["uris"]
+                ],
+                sha256 = package["sha256"],
+                mergedusr = mergedusr,
+                depends_on = package["depends_on"],
+                depends_file_map = json.encode(filemap),
+                package_name = package["name"],
+            )
 
     if not use_facts:
         for mod in mctx.modules:

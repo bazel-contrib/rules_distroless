@@ -350,7 +350,7 @@ def _translate_dependency_set_impl(rctx):
     for architecture in dependency_set["sets"].keys():
         for (short_key, version) in dependency_set["sets"][architecture].items():
             package_key = short_key + "=" + version
-            repo_name = util.sanitize(package_key)
+            repo_name = util.package_repo_name(package_key, mergedusr = rctx.attr.mergedusr)
             package = packages[package_key]
 
             packages_to_architectures.setdefault(
@@ -369,7 +369,7 @@ def _translate_dependency_set_impl(rctx):
                     control_targets = '"@%s//:control"' % repo_name,
                     src = '"@%s//:data"' % repo_name,
                     deps = [
-                        "@" + util.sanitize(dep_key) + "//:data"
+                        "@" + util.package_repo_name(dep_key, mergedusr = rctx.attr.mergedusr) + "//:data"
                         for dep_key in package["depends_on"]
                         if packages[dep_key]["architecture"] in [architecture, "all"]
                     ],
@@ -395,7 +395,7 @@ def _translate_dependency_set_impl(rctx):
             extra = _DEB_CC_IMPORT.format(
                 target_name = target_name,
                 selects = starlark_codegen_utils.to_dict_attr({
-                    "//:linux_%s" % architecture: "@%s//:%s" % (util.sanitize(package_key), target_name)
+                    "//:linux_%s" % architecture: "@%s//:%s" % (util.package_repo_name(package_key, mergedusr = rctx.attr.mergedusr), target_name)
                     for (architecture, package_key) in info.architectures.items()
                 }),
             )

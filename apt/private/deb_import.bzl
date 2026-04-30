@@ -144,7 +144,7 @@ def resolve_symlink(target_path, relative_symlink):
     resolved_path = "/".join(result_parts)
     return resolved_path
 
-def _discover_contents(rctx, depends_on, depends_file_map, target_name):
+def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedusr = False):
     result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
     contents_raw = result.stdout.splitlines()
 
@@ -250,7 +250,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     for dep in depends_on:
         (suite, name, arch, version) = lockfile.parse_package_key(dep)
         deps.append(
-            "@%s//:%s_wodeps" % (util.sanitize(dep), name.removesuffix("-dev")),
+            "@%s//:%s_wodeps" % (util.package_repo_name(dep, mergedusr = mergedusr), name.removesuffix("-dev")),
         )
 
     pkgconfigs = []
@@ -407,6 +407,7 @@ def _deb_import_impl(rctx):
         rctx.attr.depends_on,
         json.decode(rctx.attr.depends_file_map),
         rctx.attr.package_name.removesuffix("-dev"),
+        mergedusr = rctx.attr.mergedusr,
     )
 
     foreign_symlinks = {}
@@ -422,7 +423,7 @@ def _deb_import_impl(rctx):
 
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
         mergedusr = rctx.attr.mergedusr,
-        depends_on = ["@" + util.sanitize(dep_key) + "//:data" for dep_key in rctx.attr.depends_on],
+        depends_on = ["@" + util.package_repo_name(dep_key, mergedusr = rctx.attr.mergedusr) + "//:data" for dep_key in rctx.attr.depends_on],
         target_name = rctx.attr.target_name,
         cc_import_targets = cc_import_targets,
         outs = outs,
