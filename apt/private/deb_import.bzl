@@ -156,6 +156,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     a_files = []
     h_files = []
     hpp_files = []
+    ipp_files = []
     hpp_files_woext = []
     pc_files = []
     o_files = []
@@ -197,6 +198,8 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             h_files.append(line)
         elif line.endswith(".hpp"):
             hpp_files.append(line)
+        elif line.endswith(".ipp"):
+            ipp_files.append(line)
         elif line.find("include/c++") != -1 or (line.find("usr/include/") != -1 and line[line.rfind("/") + 1:].find(".") == -1):
             hpp_files_woext.append(line)
         elif line.endswith(".o"):
@@ -224,7 +227,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                     foreign_symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
 
     self_symlinks = {}
-    for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
+    for file in so_files + h_files + hpp_files + ipp_files + a_files + hpp_files_woext:
         for (symlink, symlink_target) in unresolved_symlinks.items():
             if file == symlink_target:
                 self_symlinks[symlink] = unresolved_symlinks.pop(symlink)
@@ -327,7 +330,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     linkscript_paths = [path for (path, _) in linkscripts]
 
     outs = []
-    for out in so_files + h_files + hpp_files + a_files + hpp_files_woext + o_files:
+    for out in so_files + h_files + hpp_files + ipp_files + a_files + hpp_files_woext + o_files:
         if out not in symlinks:
             outs.append(out)
 
@@ -373,7 +376,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
 
     if is_dev:
         build_file_content = _generate_dev_package_content(
-            rctx, so_files, symlinks, h_files, hpp_files, hpp_files_woext, pc_files,
+            rctx, so_files, symlinks, h_files, hpp_files, ipp_files, hpp_files_woext, pc_files,
             file_to_repo, so_needed_map, repo_prefix, depends_on, linkscript_dep_map,
         )
     else:
@@ -576,7 +579,7 @@ def _resolve_hdrs_dep(dep_package_name):
     return "@{}//:{}_hdrs".format(sanitized, base_name)
 
 
-def _generate_dev_package_content(rctx, so_files, symlinks, h_files, hpp_files, hpp_files_woext, pc_files, file_to_repo, so_needed_map, repo_prefix, depends_on, linkscript_dep_map):
+def _generate_dev_package_content(rctx, so_files, symlinks, h_files, hpp_files, ipp_files, hpp_files_woext, pc_files, file_to_repo, so_needed_map, repo_prefix, depends_on, linkscript_dep_map):
     """Generate BUILD content for dev packages.
 
     1. hdrs via directory_glob
@@ -668,6 +671,7 @@ def _generate_dev_package_content(rctx, so_files, symlinks, h_files, hpp_files, 
     lines.append('    srcs = [')
     lines.append('        "usr/include/**/*.h",')
     lines.append('        "usr/include/**/*.hpp",')
+    lines.append('        "usr/include/**/*.ipp",')
     lines.append('    ],')
     lines.append('    allow_empty = True,')
     lines.append('    directory = ":directory",')
