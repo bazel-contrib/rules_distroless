@@ -42,12 +42,15 @@ deb_export(
     symlink_outs = {symlink_outs},
     self_symlinks = {self_symlinks},
     outs = {outs},
+    linkscripts = {linkscripts},
+    linkscript_outs = {linkscript_outs},
+    linkscript_deps = {linkscript_deps},
     visibility = ["//visibility:public"]
 )
 
 directory(
     name = "directory",
-    srcs = {symlink_outs} + {outs},
+    srcs = {symlink_outs} + {outs} + {linkscript_outs},
     visibility = ["//visibility:public"]
 )
 
@@ -156,6 +159,8 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     hpp_files_woext = []
     pc_files = []
     o_files = []
+    linkscripts = []
+    linkscript_dep_labels = []
     symlinks = {}
 
     for line in contents_raw:
@@ -186,6 +191,8 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         if (line.endswith(".so") or line.find(".so.") != -1) and line.find("lib") != -1:
             if line.find("libthread_db") != -1:
                 continue
+
+            # Will be classified as so_file or linkscript after extraction
             so_files.append(line)
         elif line.endswith(".a") and line.find("lib"):
             a_files.append(line)
@@ -241,6 +248,108 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                 json.encode_indent(unresolved_symlinks),
             ),
         )
+
+    # Detect link scripts: files that look like .so but are actually text files (linker scripts)
+    # Extract candidate so_files that are not symlinks to check their content
+    so_non_symlink = [f for f in so_files if f not in symlinks]
+    if so_non_symlink:
+        rctx.execute(
+            ["tar", "-xvf", "data.tar.xz"] + ["./" + f for f in so_non_symlink],
+        )
+
+        # Build a mapping from file path -> dep repo name for resolving linkscript references
+        # Extract the module extension prefix from rctx.attr.name (e.g. "rules_distroless++apt+")
+        # so that dependency repo names use the full canonical name.
+        self_sanitized = rctx.attr.target_name
+        repo_prefix = ""
+        if rctx.attr.name.endswith(self_sanitized):
+            repo_prefix = rctx.attr.name[:-len(self_sanitized)]
+
+        file_to_repo = {}
+        for dep in depends_on:
+            (suite, name, arch, _) = lockfile.parse_package_key(dep)
+            filemap = depends_file_map.get(name, []) or []
+            repo_name = repo_prefix + util.sanitize(dep)
+            for file in filemap:
+                file_to_repo[file] = repo_name
+
+        for f in so_non_symlink:
+            if rctx.path(f).exists:
+                # Use `file` command to check if it's a text file (not ELF binary)
+                file_result = rctx.execute(["file", "--mime-type", "-b", f])
+                mime_type = file_result.stdout.strip()
+                is_text = mime_type.startswith("text/")
+
+                if is_text:
+                    content = rctx.read(rctx.path(f))
+
+                    # Collect all absolute paths referenced in the linkscript and
+                    # build a replacement map to actual generated output paths.
+                    # Only consider actual library files (not directories) to avoid
+                    # substring matches like /usr/lib replacing part of a longer path.
+                    replacements = {}
+                    delimiters = [" ", ")", ",", "\n", "\t", "("]
+                    for (rel_path, repo) in file_to_repo.items():
+                        if rel_path.find(".") == -1 or rel_path.endswith("/"):
+                            continue
+                        abs_path = "/" + rel_path
+
+                        # Only match if the path appears as a complete token
+                        # (followed by a delimiter or at end of content)
+                        found = False
+                        for delim in delimiters:
+                            if (abs_path + delim) in content:
+                                found = True
+                                break
+                        if not found and content.endswith(abs_path):
+                            found = True
+                        if found:
+                            replacements[abs_path] = "$$BINDIR/external/{}/{}".format(repo, rel_path)
+
+                    # Also check self package files (exclude current linkscript file)
+                    for self_file in so_files + a_files:
+                        if self_file == f:
+                            continue
+                        abs_path = "/" + self_file
+                        found = False
+                        for delim in delimiters:
+                            if (abs_path + delim) in content:
+                                found = True
+                                break
+                        if not found and content.endswith(abs_path):
+                            found = True
+                        if found and abs_path not in replacements:
+                            replacements[abs_path] = "$$BINDIR/external/{}/{}".format(rctx.attr.name, self_file)
+
+                    # Collect foreign dep labels from replacements
+                    for (abs_path, replacement) in replacements.items():
+                        # Foreign deps are from other repos (not self package)
+                        rel_path = abs_path.lstrip("/")
+                        if rel_path in file_to_repo:
+                            repo = file_to_repo[rel_path]
+
+                            # Strip repo_prefix to get the apparent name visible from this repo
+                            apparent_repo = repo
+                            if repo_prefix and repo.startswith(repo_prefix):
+                                apparent_repo = repo[len(repo_prefix):]
+                            label = "@{}//:{}".format(apparent_repo, rel_path)
+                            if label not in linkscript_dep_labels:
+                                linkscript_dep_labels.append(label)
+
+                    # Replace longest paths first to prevent shorter paths from
+                    # matching as substrings of longer ones
+                    rewritten = content
+                    for old in sorted(replacements.keys(), key = len, reverse = True):
+                        rewritten = rewritten.replace(old, replacements[old])
+
+                    linkscripts.append((f, rewritten))
+                    so_files.remove(f)
+                    util.warning(rctx, "detected linker script: {}".format(f))
+
+                # Clean up extracted file
+                rctx.execute(["rm", "-f", f])
+
+    linkscript_paths = [path for (path, _) in linkscripts]
 
     outs = []
 
@@ -331,7 +440,7 @@ so_library(
             name = target_name,
             hdrs = h_files + hpp_files,
             additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + o_files,
+            additional_linker_inputs = so_files + linkscript_paths + o_files + linkscript_dep_labels,
             linkopts = {
                 opt: True
                 for opt in [
@@ -360,7 +469,7 @@ so_library(
             name = target_name,
             hdrs = h_files + hpp_files,
             additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + a_files + o_files,
+            additional_linker_inputs = so_files + linkscript_paths + a_files + o_files + linkscript_dep_labels,
             includes = [],
         )
     else:
@@ -374,7 +483,7 @@ so_library(
             hdrs = h_files + hpp_files,
             deps = deps,
             additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + o_files,
+            additional_linker_inputs = so_files + linkscript_paths + o_files + linkscript_dep_labels,
             linkopts = [
                 # Required for linker to find .so libraries
                 "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
@@ -395,7 +504,7 @@ so_library(
             direct_deps = [":_so_libs"],
         )
 
-    return (build_file_content, outs, foreign_symlinks, self_symlinks)
+    return (build_file_content, outs, foreign_symlinks, self_symlinks, linkscripts, linkscript_dep_labels)
 
 def _deb_import_impl(rctx):
     rctx.download_and_extract(
@@ -404,7 +513,7 @@ def _deb_import_impl(rctx):
     )
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
-    cc_import_targets, outs, symlinks, self_symlinks = _discover_contents(
+    cc_import_targets, outs, symlinks, self_symlinks, linkscripts, linkscript_dep_labels = _discover_contents(
         rctx,
         rctx.attr.depends_on,
         json.decode(rctx.attr.depends_file_map),
@@ -422,6 +531,10 @@ def _deb_import_impl(rctx):
         for (symlink, indices) in foreign_symlinks.items()
     }
 
+    # Build linkscripts dict: path -> rewritten content
+    linkscripts_dict = {path: content for (path, content) in linkscripts}
+    linkscript_outs = [path for (path, _) in linkscripts]
+
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
         mergedusr = rctx.attr.mergedusr,
         depends_on = ["@" + util.sanitize(dep_key) + "//:data" for dep_key in rctx.attr.depends_on],
@@ -431,6 +544,9 @@ def _deb_import_impl(rctx):
         foreign_symlinks = foreign_symlinks,
         self_symlinks = self_symlinks,
         symlink_outs = symlinks.keys() + self_symlinks.keys(),
+        linkscripts = linkscripts_dict,
+        linkscript_outs = linkscript_outs,
+        linkscript_deps = linkscript_dep_labels,
     ))
 
 deb_import = repository_rule(

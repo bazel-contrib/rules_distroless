@@ -48,29 +48,63 @@ def _deb_export_impl(ctx):
                 if f.short_path[len(f.owner.repo_name) + 4:] == target_path:
                     target_file = f
                     break
+        if target_file == None:
+            for f in ctx.outputs.linkscript_outs:
+                if f.short_path[len(f.owner.repo_name) + 4:] == target_path:
+                    target_file = f
+                    break
         if target_file != None:
             ctx.actions.symlink(
                 output = ctx.outputs.symlink_outs[foreign_symlink_count + i],
                 target_file = target_file,
             )
 
+    # Generate linkscript files with rewritten content
+    # Write a template file with $$BINDIR placeholder, then replace at execution
+    # time with the absolute path (pwd + bin_dir.path) since analysis-time paths
+    # are relative.
+    for ls_out in ctx.outputs.linkscript_outs:
+        ls_path = ls_out.short_path[len(ls_out.owner.repo_name) + 4:]
+        content = ctx.attr.linkscripts.get(ls_path, "")
+
+        # Write template with placeholder to an intermediate file
+        template_file = ctx.actions.declare_file(ls_out.basename + ".tpl", sibling = ls_out)
+        ctx.actions.write(
+            output = template_file,
+            content = content,
+        )
+        ctx.actions.run_shell(
+            inputs = [template_file] + ctx.files.linkscript_deps,
+            outputs = [ls_out],
+            command = 'sed "s|\\$\\$BINDIR|$(pwd)/{bindir}|g" "{tpl}" > "{out}"'.format(
+                bindir = ctx.bin_dir.path,
+                tpl = template_file.path,
+                out = ls_out.path,
+            ),
+            mnemonic = "LinkScript",
+            execution_requirements = {"no-sandbox": "1"},
+        )
+
     if len(ctx.outputs.outs):
         fout = ctx.outputs.outs[0]
-        output = fout.path[:fout.path.find(fout.owner.repo_name) + len(fout.owner.repo_name)]
+        output_base = fout.path[:fout.path.find(fout.owner.repo_name) + len(fout.owner.repo_name)]
         args = ctx.actions.args()
-        args.add("-xf")
         args.add_all(ctx.files.srcs)
-        args.add("-C")
-        args.add(output)
+        args.add(output_base)
         args.add_all(
             ctx.outputs.outs,
             map_each = lambda src: src.short_path[len(src.owner.repo_name) + 4:],
             allow_closure = True,
         )
-        ctx.actions.run(
-            executable = bsdtar.tarinfo.binary,
-            inputs = ctx.files.srcs,
+        ctx.actions.run_shell(
             outputs = ctx.outputs.outs,
+            inputs = ctx.files.srcs,
+            tools = [bsdtar.tarinfo.binary],
+            command = """
+                "{tar}" -xf $1 -C $2 "${{@:3}}"
+            """.format(
+                tar = bsdtar.tarinfo.binary.path,
+            ),
             arguments = [args],
             mnemonic = "Unpack",
             toolchain = TAR_TOOLCHAIN_TYPE,
@@ -80,7 +114,9 @@ def _deb_export_impl(ctx):
         files = depset(
             ctx.outputs.outs +
             ctx.outputs.symlink_outs +
-            ctx.files.foreign_symlinks,
+            ctx.outputs.linkscript_outs +
+            ctx.files.foreign_symlinks +
+            ctx.files.linkscript_deps,
         ),
     )
 
@@ -94,6 +130,11 @@ deb_export = rule(
         "self_symlinks": attr.string_dict(),
         "symlink_outs": attr.output_list(),
         "outs": attr.output_list(),
+        # mapping of linkscript path -> rewritten content
+        "linkscripts": attr.string_dict(),
+        "linkscript_outs": attr.output_list(),
+        # external files referenced by linkscripts
+        "linkscript_deps": attr.label_list(allow_files = True),
     },
     toolchains = [
         TAR_TOOLCHAIN_TYPE,
