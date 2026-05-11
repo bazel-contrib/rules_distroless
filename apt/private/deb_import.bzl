@@ -634,6 +634,27 @@ def _generate_dev_package_content(rctx, so_files, symlinks, h_files, hpp_files, 
         seen[stripped] = True
         hdrs_includes.append(stripped)
 
+    # Some Debian packages ship headers under `usr/include/<arch-triple>/` (e.g.
+    # x86_64-linux-gnu) and reference them by bare name from siblings. The .pc
+    # file frequently omits this multiarch dir, so detect it from the actual
+    # header file paths and add it to includes.
+    for hdr in h_files + hpp_files:
+        idx = hdr.find("usr/include/")
+        if idx == -1:
+            continue
+        rest = hdr[idx + len("usr/include/"):]
+        slash = rest.find("/")
+        if slash == -1:
+            continue
+        first = rest[:slash]
+        if "-linux-" not in first:
+            continue
+        ma_inc = "usr/include/" + first
+        if ma_inc in seen:
+            continue
+        seen[ma_inc] = True
+        hdrs_includes.append(ma_inc)
+
     # 1. Generate hdrs target: directory_glob + cc_library
     hdrs_deps = []
     for dep in depends_on:
