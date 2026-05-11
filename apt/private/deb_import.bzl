@@ -13,6 +13,7 @@ load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_distroless//apt/private:cc_deb_library.bzl", "cc_deb_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
+load("@bazel_skylib//rules/directory:glob.bzl", "directory_glob")
 
 deb_postfix(
     name = "data",
@@ -57,96 +58,95 @@ directory(
 {cc_import_targets}
 '''
 
-_CC_LIBRARY_LIBC_TMPL = """
-alias(
-    name = "{name}_wodeps",
-    actual = ":{name}",
-    visibility = ["//visibility:public"]
-)
-
-cc_library(
-    name = "{name}",
-    hdrs = {hdrs},
-    additional_compiler_inputs = {additional_compiler_inputs},
-    additional_linker_inputs = {additional_linker_inputs},
-    includes = {includes},
-    visibility = ["//visibility:public"],
-)
-"""
-
-_CC_IMPORT_TMPL = """
-cc_import(
-    name = "{name}",
-    hdrs = {hdrs},
-    includes = {includes},
-    linkopts = {linkopts},
-    shared_library = {shared_lib},
-    static_library = {static_lib},
-)
-"""
-
-_CC_LIBRARY_TMPL = """
-cc_library(
-    name = "{name}_wodeps",
-    hdrs = {hdrs},
-    deps = {direct_deps},
-    linkopts = {linkopts},
-    additional_compiler_inputs = {additional_compiler_inputs},
-    additional_linker_inputs = {additional_linker_inputs},
-    strip_include_prefix = {strip_include_prefix},
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "{name}",
-    deps = [":{name}_wodeps"] + {deps},
-    visibility = ["//visibility:public"],
-)
-"""
-
-_CC_SYS_LIBRARY_TMPL = """
-cc_deb_library(
-    name = "{name}_wodeps",
-    hdrs = {hdrs},
-    deps = {direct_deps},
-    linkopts = {linkopts},
-    additional_compiler_inputs = {additional_compiler_inputs},
-    additional_linker_inputs = {additional_linker_inputs},
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "{name}",
-    deps = [":{name}_wodeps"] + {deps},
-    visibility = ["//visibility:public"],
-)
-"""
-
 def resolve_symlink(target_path, relative_symlink):
-    # Split paths into components
     target_parts = target_path.split("/")
     symlink_parts = relative_symlink.split("/")
-
-    # Remove the file name from target path to get the directory
     target_dir_parts = target_parts[:-1]
-
-    # Process the relative symlink
     result_parts = target_dir_parts[:]
     for part in symlink_parts:
         if part == "..":
-            # Move up one directory by removing the last component
             if result_parts:
                 result_parts.pop()
         elif part == "." or part == "":
-            # Ignore current directory or empty components
             continue
         else:
-            # Append the component to the path
             result_parts.append(part)
+    return "/".join(result_parts)
 
-    # Join the parts back into a path
-    resolved_path = "/".join(result_parts)
-    return resolved_path
+
+def _strip_version_suffix(so_name):
+    """Strip version suffix from a library name, e.g. libfoo.so.1.2.3 -> libfoo.so"""
+    idx = so_name.find(".so.")
+    if idx != -1:
+        return so_name[:idx + 3]
+    return so_name
+
+
+def _get_so_basename(so_path):
+    """Extract the basename from a so file path, e.g. usr/lib/libfoo.so.1 -> libfoo.so.1"""
+    return so_path[so_path.rfind("/") + 1:]
+
+
+def _get_cc_import_name(so_basename):
+    """Get cc_import target name from so basename, e.g. libfoo.so.1.2.3 -> libfoo.so.1.2.3"""
+    return so_basename
+
+
+def _get_library_base_name(so_basename):
+    """Strip lib prefix and .so suffix, e.g. libfoo.so -> foo, libfoo.so.1 -> foo.so.1"""
+    name = so_basename
+    if name.startswith("lib"):
+        name = name[3:]
+    # Remove .so and anything after
+    so_idx = name.find(".so")
+    if so_idx != -1:
+        name = name[:so_idx]
+    return name
+
+
+def _is_top_level_so(so_path):
+    """Check if a .so file is directly in usr/lib/ or usr/lib/x86_64-linux-gnu/.
+
+    Also supports split-usr layouts (e.g. Debian bookworm) where .so files
+    reside in lib/x86_64-linux-gnu/ instead of usr/lib/x86_64-linux-gnu/.
+
+    Excludes files in deeper subdirectories like usr/lib/x86_64-linux-gnu/foo/libbar.so.
+    """
+    for prefix in (
+        "usr/lib/x86_64-linux-gnu/",
+        "usr/lib/aarch64-linux-gnu/",
+        "usr/lib/",
+        "lib/x86_64-linux-gnu/",
+        "lib/aarch64-linux-gnu/",
+        "lib/",
+    ):
+        if so_path.startswith(prefix):
+            remainder = so_path[len(prefix):]
+            return "/" not in remainder
+    return False
+
+
+def _run_readelf(rctx, so_path):
+    """Run readelf -dW on a .so file and return list of NEEDED libraries."""
+    # Force C locale so readelf emits ASCII brackets around library names,
+    # regardless of the build host's locale (e.g., zh_CN would produce full-width
+    # brackets that our parser below cannot match).
+    result = rctx.execute(
+        ["readelf", "-dW", so_path],
+        environment = {"LC_ALL": "C", "LANG": "C"},
+    )
+    if result.return_code != 0:
+        return []
+    needed = []
+    for line in result.stdout.splitlines():
+        if "(NEEDED)" in line:
+            # Extract the library name from the bracket
+            start = line.find("[")
+            end = line.find("]")
+            if start != -1 and end != -1:
+                needed.append(line[start + 1:end])
+    return needed
+
 
 def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
@@ -161,16 +161,15 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     o_files = []
     linkscripts = []
     linkscript_dep_labels = []
+    linkscript_dep_map = {}  # linkscript path -> list of dep labels
     symlinks = {}
 
     for line in contents_raw:
-        # Skip directories
         if line.endswith("/"):
             continue
 
         line = line[line.find(" ./") + 3:]
 
-        # Skip everything in man pages and examples
         if line.startswith("usr/share"):
             continue
 
@@ -181,8 +180,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             line = line[:is_symlink_idx]
             if line.endswith(".pc"):
                 continue
-
-            # An absolute symlink
             if symlink_target.startswith("/"):
                 resolved_symlink = symlink_target.removeprefix("/")
             else:
@@ -191,8 +188,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         if (line.endswith(".so") or line.find(".so.") != -1) and line.find("lib") != -1:
             if line.find("libthread_db") != -1:
                 continue
-
-            # Will be classified as so_file or linkscript after extraction
             so_files.append(line)
         elif line.endswith(".a") and line.find("lib"):
             a_files.append(line)
@@ -212,13 +207,11 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         if resolved_symlink:
             symlinks[line] = resolved_symlink
 
-    # Resolve symlinks:
+    # Resolve symlinks
     unresolved_symlinks = {} | symlinks
 
     foreign_symlinks = {}
 
-    # TODO: this is highly inefficient, change the filemapping to be
-    # file -> package instead of package -> files
     for dep in depends_on:
         (suite, name, arch, _) = lockfile.parse_package_key(dep)
         filemap = depends_file_map.get(name, []) or []
@@ -230,7 +223,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                     unresolved_symlinks.pop(symlink)
                     foreign_symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
 
-    # Resolve self symlinks
     self_symlinks = {}
     for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
         for (symlink, symlink_target) in unresolved_symlinks.items():
@@ -249,17 +241,13 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             ),
         )
 
-    # Detect link scripts: files that look like .so but are actually text files (linker scripts)
-    # Extract candidate so_files that are not symlinks to check their content
+    # Detect link scripts
     so_non_symlink = [f for f in so_files if f not in symlinks]
     if so_non_symlink:
         rctx.execute(
             ["tar", "-xvf", "data.tar.xz"] + ["./" + f for f in so_non_symlink],
         )
 
-        # Build a mapping from file path -> dep repo name for resolving linkscript references
-        # Extract the module extension prefix from rctx.attr.name (e.g. "rules_distroless++apt+")
-        # so that dependency repo names use the full canonical name.
         self_sanitized = rctx.attr.target_name
         repo_prefix = ""
         if rctx.attr.name.endswith(self_sanitized):
@@ -275,27 +263,18 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
 
         for f in so_non_symlink:
             if rctx.path(f).exists:
-                # Use `file` command to check if it's a text file (not ELF binary)
                 file_result = rctx.execute(["file", "--mime-type", "-b", f])
                 mime_type = file_result.stdout.strip()
                 is_text = mime_type.startswith("text/")
 
                 if is_text:
                     content = rctx.read(rctx.path(f))
-
-                    # Collect all absolute paths referenced in the linkscript and
-                    # build a replacement map to actual generated output paths.
-                    # Only consider actual library files (not directories) to avoid
-                    # substring matches like /usr/lib replacing part of a longer path.
                     replacements = {}
                     delimiters = [" ", ")", ",", "\n", "\t", "("]
                     for (rel_path, repo) in file_to_repo.items():
                         if rel_path.find(".") == -1 or rel_path.endswith("/"):
                             continue
                         abs_path = "/" + rel_path
-
-                        # Only match if the path appears as a complete token
-                        # (followed by a delimiter or at end of content)
                         found = False
                         for delim in delimiters:
                             if (abs_path + delim) in content:
@@ -306,7 +285,6 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                         if found:
                             replacements[abs_path] = "$$BINDIR/external/{}/{}".format(repo, rel_path)
 
-                    # Also check self package files (exclude current linkscript file)
                     for self_file in so_files + a_files:
                         if self_file == f:
                             continue
@@ -321,190 +299,539 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
                         if found and abs_path not in replacements:
                             replacements[abs_path] = "$$BINDIR/external/{}/{}".format(rctx.attr.name, self_file)
 
-                    # Collect foreign dep labels from replacements
+                    # Track per-linkscript deps
+                    ls_deps = []
                     for (abs_path, replacement) in replacements.items():
-                        # Foreign deps are from other repos (not self package)
                         rel_path = abs_path.lstrip("/")
                         if rel_path in file_to_repo:
                             repo = file_to_repo[rel_path]
-
-                            # Strip repo_prefix to get the apparent name visible from this repo
                             apparent_repo = repo
                             if repo_prefix and repo.startswith(repo_prefix):
                                 apparent_repo = repo[len(repo_prefix):]
                             label = "@{}//:{}".format(apparent_repo, rel_path)
                             if label not in linkscript_dep_labels:
                                 linkscript_dep_labels.append(label)
+                            if label not in ls_deps:
+                                ls_deps.append(label)
 
-                    # Replace longest paths first to prevent shorter paths from
-                    # matching as substrings of longer ones
                     rewritten = content
-                    for old in sorted(replacements.keys(), key = len, reverse = True):
+                    for old in sorted(replacements.keys(), key=len, reverse=True):
                         rewritten = rewritten.replace(old, replacements[old])
 
                     linkscripts.append((f, rewritten))
+                    linkscript_dep_map[f] = ls_deps
                     so_files.remove(f)
-                    util.warning(rctx, "detected linker script: {}".format(f))
 
-                # Clean up extracted file
                 rctx.execute(["rm", "-f", f])
 
     linkscript_paths = [path for (path, _) in linkscripts]
 
     outs = []
-
     for out in so_files + h_files + hpp_files + a_files + hpp_files_woext + o_files:
         if out not in symlinks:
             outs.append(out)
 
-    deps = []
+    # Deduplicate so_files to prevent duplicate cc_import targets
+    seen_so = set()
+    deduped_so_files = []
+    for f in so_files:
+        if f not in seen_so:
+            seen_so.add(f)
+            deduped_so_files.append(f)
+    so_files = deduped_so_files
+
+    # Build file->repo mapping for NEEDED resolution
+    file_to_repo = {}
+    repo_prefix = ""
+    if rctx.attr.name.endswith(rctx.attr.target_name):
+        repo_prefix = rctx.attr.name[:-len(rctx.attr.target_name)]
     for dep in depends_on:
-        (suite, name, arch, version) = lockfile.parse_package_key(dep)
-        deps.append(
-            "@%s//:%s_wodeps" % (util.sanitize(dep), name.removesuffix("-dev")),
-        )
+        (suite, name, arch, _) = lockfile.parse_package_key(dep)
+        filemap = depends_file_map.get(name, []) or []
+        repo_name = repo_prefix + util.sanitize(dep)
+        for file in filemap:
+            file_to_repo[file] = repo_name
 
-    pkgconfigs = []
-    if len(pc_files):
-        # TODO: use rctx.extract instead.
+    # Run readelf on all non-symlink .so files to get NEEDED deps
+    so_needed_map = {}  # so_path -> [needed_lib_names]
+    so_non_symlink_files = [f for f in so_files if f not in symlinks]
+    if so_non_symlink_files:
         rctx.execute(
-            ["tar", "-xvf", "data.tar.xz"] + ["./" + pc for pc in pc_files],
+            ["tar", "-xvf", "data.tar.xz"] + ["./" + f for f in so_non_symlink_files],
         )
-        for pc in pc_files:
-            if rctx.path(pc).exists:
-                pkgconfigs.append(pc)
+        for f in so_non_symlink_files:
+            if rctx.path(f).exists:
+                needed = _run_readelf(rctx, f)
+                so_needed_map[f] = needed
+        # Cleanup
+        for f in so_non_symlink_files:
+            if rctx.path(f).exists:
+                rctx.execute(["rm", "-f", f])
 
-    build_file_content = """
-so_library(
-    name = "_so_libs",
-    dynamic_libs = {}
-)
-""".format(so_files)
+    # Determine if this is a dev package
+    is_dev = rctx.attr.package_name.endswith("-dev")
 
-    rpaths = {}
-    for so in so_files + a_files:
-        rpath = so[:so.rfind("/")]
-        rpaths[rpath] = None
-
-    # Package has a pkgconfig, use that as the source of truth.
-    if len(pkgconfigs):
-        link_paths = []
-        includes = []
-
-        static_lib = None
-        shared_lib = None
-
-        import_targets = []
-
-        for pc_file in pkgconfigs:
-            pkgc = pkgconfig(rctx, pc_file)
-            includes += pkgc.includes
-            link_paths += pkgc.link_paths
-
-            if len(pkgc.libnames) == 0:
-                continue
-
-            for libname in pkgc.libnames:
-                if libname + "_import" in import_targets:
-                    continue
-
-                subtarget = libname + "_import"
-                import_targets.append(subtarget)
-
-                # Look for a static archive
-                # for ar in a_files:
-                #     if ar.endswith(pkgc.libname + ".a"):
-                #         static_lib = '":%s"' % ar
-                #         break
-
-                # Look for a dynamic library
-                IGNORE = ["libfl"]
-                for so_lib in so_files:
-                    if libname and libname not in IGNORE and so_lib.endswith(libname + ".so"):
-                        shared_lib = '":%s"' % so_lib
-                        break
-
-                build_file_content += _CC_IMPORT_TMPL.format(
-                    name = subtarget,
-                    shared_lib = shared_lib,
-                    static_lib = static_lib,
-                    hdrs = [],
-                    includes = {
-                        "external/.." + include: True
-                        for include in includes + ["/usr/include", "/usr/include/x86_64-linux-gnu"]
-                    }.keys(),
-                    linkopts = pkgc.linkopts,
-                )
-
-        build_file_content += _CC_LIBRARY_TMPL.format(
-            name = target_name,
-            hdrs = h_files + hpp_files,
-            additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + linkscript_paths + o_files + linkscript_dep_labels,
-            linkopts = {
-                opt: True
-                for opt in [
-                    # # Needed for cc_test binaries to locate its dependencies.
-                    # "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rpath)
-                    # for rp in rpaths
-                ] + [
-                    # Needed for cc_test binaries to locate its dependencies as a build tool
-                    # "-Wl,-rpath=./external/{}/{}".format(rctx.attr.name, rpath)
-                    # for rp in rpaths
-                ] + [
-                    "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, lp)
-                    for lp in link_paths
-                ] + [
-                    "-Wl,-rpath=/" + rp
-                    for rp in rpaths
-                ]
-            }.keys(),
-            direct_deps = import_targets + [":_so_libs"],
-            deps = deps,
-            strip_include_prefix = None,
-        )
-
-    elif (len(hpp_files) or len(h_files)) and ((target_name.find("libc") != -1 or target_name.find("libstdc") != -1 or target_name.find("libgcc") != -1)):
-        build_file_content += _CC_LIBRARY_LIBC_TMPL.format(
-            name = target_name,
-            hdrs = h_files + hpp_files,
-            additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + linkscript_paths + a_files + o_files + linkscript_dep_labels,
-            includes = [],
+    if is_dev:
+        build_file_content = _generate_dev_package_content(
+            rctx, so_files, symlinks, h_files, hpp_files, hpp_files_woext, pc_files,
+            file_to_repo, so_needed_map, repo_prefix, depends_on, linkscript_dep_map,
         )
     else:
-        extra_linkopts = []
-        if target_name == "libbsd0":
-            extra_linkopts = [
-                "-Wl,--remap-inputs=/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7=$(BINDIR)/external/{}/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7".format(rctx.attr.name),
-            ]
-        build_file_content += _CC_SYS_LIBRARY_TMPL.format(
-            name = target_name,
-            hdrs = h_files + hpp_files,
-            deps = deps,
-            additional_compiler_inputs = hpp_files_woext,
-            additional_linker_inputs = so_files + linkscript_paths + o_files + linkscript_dep_labels,
-            linkopts = [
-                # Required for linker to find .so libraries
-                "-L$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
-                for rp in rpaths
-            ] + [
-                # # Required for bazel test binary to find its dependencies.
-                # "-Wl,-rpath=../{}/{}".format(rctx.attr.name, rp)
-                # for rp in rpaths
-            ] + [
-                # Required for ld to validate rpath entries
-                "-Wl,-rpath-link=$(BINDIR)/external/{}/{}".format(rctx.attr.name, rp)
-                for rp in rpaths
-            ] + [
-                # Required for containers to find the dependencies at runtime.
-                "-Wl,-rpath=/" + rp
-                for rp in rpaths
-            ] + extra_linkopts,
-            direct_deps = [":_so_libs"],
+        build_file_content = _generate_non_dev_package_content(
+            rctx, so_files, symlinks, file_to_repo, so_needed_map, repo_prefix, linkscript_dep_map,
         )
 
     return (build_file_content, outs, foreign_symlinks, self_symlinks, linkscripts, linkscript_dep_labels)
+
+
+def _resolve_needed_dep(needed_lib, file_to_repo, repo_prefix, package_name):
+    """Resolve a NEEDED library to a Bazel target.
+
+    Returns (target, is_found) tuple.
+    needed_lib is like 'libm.so.6' or 'libfoo.so.1.2.3'.
+    """
+    # Try exact match first
+    for (file_path, repo) in file_to_repo.items():
+        file_basename = file_path[file_path.rfind("/") + 1:]
+        if file_basename == needed_lib:
+            apparent_repo = repo
+            if repo_prefix and repo.startswith(repo_prefix):
+                apparent_repo = repo[len(repo_prefix):]
+            target_name = _get_cc_import_name(file_basename)
+            return "@{}//:{}".format(apparent_repo, target_name), True
+
+    # Try match without version suffix
+    needed_base = _strip_version_suffix(needed_lib)
+    for (file_path, repo) in file_to_repo.items():
+        file_basename = file_path[file_path.rfind("/") + 1:]
+        if file_basename == needed_lib:
+            apparent_repo = repo
+            if repo_prefix and repo.startswith(repo_prefix):
+                apparent_repo = repo[len(repo_prefix):]
+            target_name = _get_cc_import_name(file_basename)
+            return "@{}//:{}".format(apparent_repo, target_name), True
+        file_base = _strip_version_suffix(file_basename)
+        if file_base == needed_base:
+            apparent_repo = repo
+            if repo_prefix and repo.startswith(repo_prefix):
+                apparent_repo = repo[len(repo_prefix):]
+            target_name = _get_cc_import_name(file_basename)
+            return "@{}//:{}".format(apparent_repo, target_name), True
+
+    return needed_lib, False
+
+
+def _generate_non_dev_package_content(rctx, so_files, symlinks, file_to_repo, so_needed_map, repo_prefix, linkscript_dep_map):
+    """Generate BUILD content for non-dev packages.
+
+    For each .so (symlink or not): cc_import target named after basename.
+    Symlink .so targets have deps pointing to the actual .so's cc_import.
+    Non-symlink .so targets have deps from readelf NEEDED resolution.
+    Linker script .so targets have deps from the parsed linkscript references.
+    """
+    lines = []
+
+    # Process non-symlink .so files first
+    for so_path in so_files:
+        if so_path in symlinks:
+            continue
+        # Only generate cc_import for .so files directly in usr/lib/ or usr/lib/x86_64-linux-gnu/
+        if not _is_top_level_so(so_path):
+            continue
+
+        so_basename = _get_so_basename(so_path)
+        target_name = _get_cc_import_name(so_basename)
+
+        # Resolve NEEDED deps
+        needed = so_needed_map.get(so_path, [])
+        deps = []
+        seen_dep_targets = set()
+        for needed_lib in needed:
+            dep_target, found = _resolve_needed_dep(needed_lib, file_to_repo, repo_prefix, rctx.attr.package_name)
+            if found and dep_target not in seen_dep_targets:
+                deps.append(dep_target)
+                seen_dep_targets.add(dep_target)
+
+        deps_str = json.encode_indent(deps) if deps else "[]"
+
+        lines.append('cc_import(')
+        lines.append('    name = "{}",'.format(target_name))
+        lines.append('    shared_library = ":{}",'.format(so_path))
+        if deps:
+            lines.append('    deps = {},'.format(deps_str))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    # Process symlink .so files - cc_import with deps on the actual .so's cc_import
+    for so_path in so_files:
+        if so_path not in symlinks:
+            continue
+        if not _is_top_level_so(so_path):
+            continue
+
+        so_basename = _get_so_basename(so_path)
+        target_name = _get_cc_import_name(so_basename)
+        symlink_target = symlinks[so_path]
+
+        # Find the actual cc_import target
+        actual_target = None
+        if symlink_target in file_to_repo:
+            target_repo = file_to_repo[symlink_target]
+            apparent_repo = target_repo
+            if repo_prefix and target_repo.startswith(repo_prefix):
+                apparent_repo = target_repo[len(repo_prefix):]
+            target_basename = _get_so_basename(symlink_target)
+            actual_target = "@{}//:{}".format(apparent_repo, _get_cc_import_name(target_basename))
+        else:
+            # Try to find in this package's non-symlink .so files
+            for other_path in so_files:
+                if other_path in symlinks:
+                    continue
+                if other_path == symlink_target:
+                    actual_target = ":{}".format(_get_cc_import_name(_get_so_basename(other_path)))
+                    break
+
+        if actual_target == None:
+            continue
+
+        lines.append('cc_import(')
+        lines.append('    name = "{}",'.format(target_name))
+        lines.append('    shared_library = ":{}",'.format(so_path))
+        lines.append('    deps = ["{}"],'.format(actual_target))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    # Generate cc_import for linker script .so files
+    for ls_path, ls_deps in linkscript_dep_map.items():
+        if not _is_top_level_so(ls_path):
+            continue
+        ls_basename = _get_so_basename(ls_path)
+        target_name = _get_cc_import_name(ls_basename)
+        deps_str = json.encode_indent(ls_deps) if ls_deps else "[]"
+
+        lines.append('cc_import(')
+        lines.append('    name = "{}",'.format(target_name))
+        lines.append('    shared_library = ":{}",'.format(ls_path))
+        if ls_deps:
+            lines.append('    deps = {},'.format(deps_str))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    return "\n".join(lines)
+
+
+def _resolve_pc_lib_dep(libname, file_to_repo, repo_prefix):
+    """Resolve a pkgconfig -l<libname> to a Bazel target.
+
+    libname is like 'libfoo' or 'libfoo.so.1'.
+    Returns (target, is_found).
+    """
+    # Try exact match
+    for (file_path, repo) in file_to_repo.items():
+        file_basename = file_path[file_path.rfind("/") + 1:]
+        if file_basename == libname:
+            apparent_repo = repo
+            if repo_prefix and repo.startswith(repo_prefix):
+                apparent_repo = repo[len(repo_prefix):]
+            return "@{}//:{}".format(apparent_repo, _get_cc_import_name(file_basename)), True
+
+    # Try matching by stripping version from both sides
+    libname_base = _strip_version_suffix(libname)
+    for (file_path, repo) in file_to_repo.items():
+        file_basename = file_path[file_path.rfind("/") + 1:]
+        file_base = _strip_version_suffix(file_basename)
+        if file_base == libname_base:
+            apparent_repo = repo
+            if repo_prefix and repo.startswith(repo_prefix):
+                apparent_repo = repo[len(repo_prefix):]
+            return "@{}//:{}".format(apparent_repo, _get_cc_import_name(file_basename)), True
+
+    # Also try libname without "lib" prefix matching
+    if libname.startswith("lib"):
+        bare_name = libname[3:]
+        for (file_path, repo) in file_to_repo.items():
+            file_basename = file_path[file_path.rfind("/") + 1:]
+            if file_basename.startswith(bare_name + ".so"):
+                apparent_repo = repo
+                if repo_prefix and repo.startswith(repo_prefix):
+                    apparent_repo = repo[len(repo_prefix):]
+                return "@{}//:{}".format(apparent_repo, _get_cc_import_name(file_basename)), True
+
+    return libname, False
+
+
+def _resolve_hdrs_dep(dep_package_name):
+    """Get the *_hdrs target for a -dev dependency.
+
+    dep_package_name is a full dependency key like "bookworm_libfoo-dev-amd64_1.0-1".
+    e.g. "bookworm_libfoo-dev-amd64_1.0-1" -> "@bookworm_libfoo-dev-amd64_1.0.1//:libfoo_hdrs"
+    """
+    (suite, name, arch, version) = lockfile.parse_package_key(dep_package_name)
+    sanitized = util.sanitize(dep_package_name)
+    # name is the raw package name like "libfoo-dev"
+    base_name = name.removesuffix("-dev")
+    return "@{}//:{}_hdrs".format(sanitized, base_name)
+
+
+def _generate_dev_package_content(rctx, so_files, symlinks, h_files, hpp_files, hpp_files_woext, pc_files, file_to_repo, so_needed_map, repo_prefix, depends_on, linkscript_dep_map):
+    """Generate BUILD content for dev packages.
+
+    1. hdrs via directory_glob
+    2. cc_import for each .so
+    3. cc_library for the main libname target
+    """
+    lines = []
+    package_name = rctx.attr.package_name
+    base_name = package_name.removesuffix("-dev")
+
+    # Parse all .pc files
+    pc_data_list = []
+    all_pc_includes = []
+    all_pc_link_paths = []
+    all_pc_defines = []
+    all_pc_libnames = []
+
+    if pc_files:
+        rctx.execute(
+            ["tar", "-xvf", "data.tar.xz"] + ["./" + pc for pc in pc_files],
+        )
+        for pc_file in pc_files:
+            if rctx.path(pc_file).exists:
+                pkgc = pkgconfig(rctx, pc_file)
+                pc_data_list.append(pkgc)
+                all_pc_includes.extend(pkgc.includes)
+                all_pc_link_paths.extend(pkgc.link_paths)
+                all_pc_defines.extend(pkgc.defines)
+                all_pc_libnames.extend(pkgc.libnames)
+        # Cleanup
+        for pc_file in pc_files:
+            if rctx.path(pc_file).exists:
+                rctx.execute(["rm", "-f", pc_file])
+
+    # Determine includes from .pc Cflags. `strip_include_prefix = "usr/include"`
+    # already exposes `usr/include/*` as top-level virtual includes, but that
+    # only enables `#include <subdir/foo.h>`. For `#include <foo.h>` where foo.h
+    # lives under `usr/include/<subdir>/`, an additional -I is needed.
+    #
+    # Bazel's `includes` attr produces `-I<pkg>/<entry>` at the physical layout
+    # and does NOT stack with strip_include_prefix, so entries must point at
+    # the real on-disk path (e.g. "usr/include/python3.11").
+    hdrs_includes = []
+    seen = {}
+    for inc in all_pc_includes:
+        stripped = inc
+        if stripped.startswith("/"):
+            stripped = stripped[1:]
+        if stripped == "usr/include":
+            continue  # already covered by strip_include_prefix
+        if not stripped.startswith("usr/include/"):
+            continue  # outside the package; cannot express cleanly here
+        if stripped in seen:
+            continue
+        seen[stripped] = True
+        hdrs_includes.append(stripped)
+
+    # 1. Generate hdrs target: directory_glob + cc_library
+    hdrs_deps = []
+    for dep in depends_on:
+        (_, name, _, _) = lockfile.parse_package_key(dep)
+        if name.endswith("-dev"):
+            hdrs_dep = _resolve_hdrs_dep(dep)
+            hdrs_deps.append(hdrs_dep)
+
+    lines.append('directory_glob(')
+    lines.append('    name = "hdrs",')
+    lines.append('    srcs = [')
+    lines.append('        "usr/include/**/*.h",')
+    lines.append('        "usr/include/**/*.hpp",')
+    lines.append('    ],')
+    lines.append('    allow_empty = True,')
+    lines.append('    directory = ":directory",')
+    lines.append('    visibility = ["//visibility:public"],')
+    lines.append(')')
+    lines.append('')
+
+    hdrs_target_name = "{}_hdrs".format(base_name)
+    lines.append('cc_library(')
+    lines.append('    name = "{}",'.format(hdrs_target_name))
+    lines.append('    hdrs = [":hdrs"],')
+    lines.append('    strip_include_prefix = "usr/include",')
+    if hdrs_includes:
+        lines.append('    includes = {},'.format(json.encode_indent(hdrs_includes)))
+    if hdrs_deps:
+        lines.append('    deps = {},'.format(json.encode_indent(hdrs_deps)))
+    lines.append('    visibility = ["//visibility:public"],')
+    lines.append(')')
+    lines.append('')
+
+    # 2. Generate cc_import for each non-symlink .so
+    # Build a mapping from so_path -> cc_import target name for alias resolution
+    so_path_to_cc_import_target = {}
+    so_import_targets = []
+    for so_path in so_files:
+        if so_path in symlinks:
+            continue
+        if not _is_top_level_so(so_path):
+            continue
+        so_basename = _get_so_basename(so_path)
+        target_name = _get_library_base_name(so_basename)
+        so_path_to_cc_import_target[so_path] = target_name
+        so_import_targets.append(target_name)
+
+        # Build deps list
+        deps = []
+        seen_dep_targets = set()
+
+        # Add hdrs target
+        hdrs_target_name_ref = ":{}_hdrs".format(base_name)
+        deps.append(hdrs_target_name_ref)
+        seen_dep_targets.add(hdrs_target_name_ref)
+
+        # Resolve -l libs from .pc
+        pc_resolved_targets = set()
+        for libname in all_pc_libnames:
+            dep_target, found = _resolve_pc_lib_dep(libname, file_to_repo, repo_prefix)
+            if found:
+                if dep_target not in seen_dep_targets:
+                    deps.append(dep_target)
+                    seen_dep_targets.add(dep_target)
+                pc_resolved_targets.add(_strip_version_suffix(libname))
+
+        # Resolve NEEDED deps from readelf (only available for non-symlink .so)
+        needed = so_needed_map.get(so_path, [])
+        unfound_libs = []
+        for needed_lib in needed:
+            dep_target, found = _resolve_needed_dep(needed_lib, file_to_repo, repo_prefix, package_name)
+            if found:
+                needed_base = _strip_version_suffix(needed_lib)
+                if needed_base not in pc_resolved_targets:
+                    already_covered = False
+                    for pc_resolved in pc_resolved_targets:
+                        if _strip_version_suffix(pc_resolved) == needed_base:
+                            already_covered = True
+                            break
+                    if not already_covered:
+                        if dep_target not in seen_dep_targets:
+                            deps.append(dep_target)
+                            seen_dep_targets.add(dep_target)
+            else:
+                unfound_libs.append(needed_lib)
+
+        # Handle unfound libs as linkopts
+        linkopts = []
+        for unfound in unfound_libs:
+            bare = unfound
+            if bare.startswith("lib") and bare.find(".so") != -1:
+                bare = bare[3:bare.find(".so")]
+            elif bare.startswith("lib"):
+                bare = bare[3:]
+            linkopts.append("-l{}".format(bare))
+
+        # Add defines from .pc
+        defines = list(all_pc_defines) if all_pc_defines else []
+
+        # Add linkopts from .pc
+        pc_linkopts = []
+        for pkgc in pc_data_list:
+            pc_linkopts.extend(pkgc.linkopts)
+
+        lines.append('cc_import(')
+        lines.append('    name = "{}",'.format(target_name))
+        lines.append('    shared_library = ":{}",'.format(so_path))
+        if defines:
+            lines.append('    defines = {},'.format(json.encode_indent(defines)))
+        if deps:
+            lines.append('    deps = {},'.format(json.encode_indent(deps)))
+        all_linkopts = pc_linkopts + ["-l{}".format(l) for l in linkopts]
+        if all_linkopts:
+            lines.append('    linkopts = {},'.format(json.encode_indent(all_linkopts)))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    # Generate cc_import for symlink .so files with deps on the actual .so's cc_import
+    for so_path in so_files:
+        if so_path not in symlinks:
+            continue
+        if not _is_top_level_so(so_path):
+            continue
+
+        so_basename = _get_so_basename(so_path)
+        target_name = _get_library_base_name(so_basename)
+        so_import_targets.append(target_name)
+
+        symlink_target = symlinks[so_path]
+
+        # Find the actual cc_import target in the dependency package
+        if symlink_target in file_to_repo:
+            target_repo = file_to_repo[symlink_target]
+            apparent_repo = target_repo
+            if repo_prefix and target_repo.startswith(repo_prefix):
+                apparent_repo = target_repo[len(repo_prefix):]
+            target_basename = _get_so_basename(symlink_target)
+            actual_target = "@{}//:{}".format(apparent_repo, _get_cc_import_name(target_basename))
+        elif symlink_target in so_path_to_cc_import_target:
+            actual_target = ":{}".format(so_path_to_cc_import_target[symlink_target])
+        else:
+            util.warning(rctx, "symlink target for {} not found: {}".format(so_path, symlink_target))
+            continue
+
+        hdrs_dep = ":{}_hdrs".format(base_name)
+        symlinks_deps = [actual_target, hdrs_dep]
+        lines.append('cc_import(')
+        lines.append('    name = "{}",'.format(target_name))
+        lines.append('    shared_library = ":{}",'.format(so_path))
+        lines.append('    deps = {},'.format(json.encode_indent(symlinks_deps)))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    # Collect linkscript target names so cc_library can depend on them
+    linkscript_target_names = []
+    for ls_path in linkscript_dep_map.keys():
+        if _is_top_level_so(ls_path):
+            ls_basename = _get_so_basename(ls_path)
+            linkscript_target_names.append(_get_library_base_name(ls_basename))
+
+    # 3. Generate cc_library for main libname (e.g. libhiredis)
+    # Skip if base_name already matches a cc_import target from step 2
+    if base_name not in so_import_targets:
+        lib_deps = [":{}".format(hdrs_target_name)]
+        for t in so_import_targets:
+            lib_deps.append(":{}".format(t))
+        for t in linkscript_target_names:
+            lib_deps.append(":{}".format(t))
+
+        lines.append('cc_library(')
+        lines.append('    name = "{}",'.format(base_name))
+        lines.append('    deps = {},'.format(json.encode_indent(lib_deps)))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    # Generate cc_import for linker script .so files
+    for ls_path, ls_deps in linkscript_dep_map.items():
+        if not _is_top_level_so(ls_path):
+            continue
+        ls_basename = _get_so_basename(ls_path)
+        target_name = _get_library_base_name(ls_basename)
+        so_import_targets.append(target_name)
+        hdrs_dep = ":{}_hdrs".format(base_name)
+        all_deps = [hdrs_dep] + ls_deps
+
+        lines.append('cc_import(')
+        lines.append('    name = "{}",'.format(target_name))
+        lines.append('    shared_library = ":{}",'.format(ls_path))
+        lines.append('    deps = {},'.format(json.encode_indent(all_deps)))
+        lines.append('    visibility = ["//visibility:public"],')
+        lines.append(')')
+        lines.append('')
+
+    return "\n".join(lines)
+
 
 def _deb_import_impl(rctx):
     rctx.download_and_extract(
@@ -512,7 +839,6 @@ def _deb_import_impl(rctx):
         sha256 = rctx.attr.sha256,
     )
 
-    # TODO: only do this if package is -dev or dependent of a -dev pkg.
     cc_import_targets, outs, symlinks, self_symlinks, linkscripts, linkscript_dep_labels = _discover_contents(
         rctx,
         rctx.attr.depends_on,
@@ -531,7 +857,6 @@ def _deb_import_impl(rctx):
         for (symlink, indices) in foreign_symlinks.items()
     }
 
-    # Build linkscripts dict: path -> rewritten content
     linkscripts_dict = {path: content for (path, content) in linkscripts}
     linkscript_outs = [path for (path, _) in linkscripts]
 
