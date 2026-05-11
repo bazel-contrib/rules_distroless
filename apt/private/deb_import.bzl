@@ -40,6 +40,7 @@ deb_export(
     srcs = glob(["data.tar*"]),
     foreign_symlinks = {foreign_symlinks},
     symlink_outs = {symlink_outs},
+    self_symlinks = {self_symlinks},
     outs = {outs},
     visibility = ["//visibility:public"]
 )
@@ -207,6 +208,8 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     # Resolve symlinks:
     unresolved_symlinks = {} | symlinks
 
+    foreign_symlinks = {}
+
     # TODO: this is highly inefficient, change the filemapping to be
     # file -> package instead of package -> files
     for dep in depends_on:
@@ -218,15 +221,14 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             for (symlink, symlink_target) in unresolved_symlinks.items():
                 if file == symlink_target:
                     unresolved_symlinks.pop(symlink)
-                    symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
+                    foreign_symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
 
     # Resolve self symlinks
     self_symlinks = {}
     for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
         for (symlink, symlink_target) in unresolved_symlinks.items():
             if file == symlink_target:
-                self_symlinks[symlink] = symlinks.pop(symlink)
-                unresolved_symlinks.pop(symlink)
+                self_symlinks[symlink] = unresolved_symlinks.pop(symlink)
                 if len(unresolved_symlinks) == 0:
                     break
 
@@ -393,7 +395,7 @@ so_library(
             direct_deps = [":_so_libs"],
         )
 
-    return (build_file_content, outs, symlinks)
+    return (build_file_content, outs, foreign_symlinks, self_symlinks)
 
 def _deb_import_impl(rctx):
     rctx.download_and_extract(
@@ -402,7 +404,7 @@ def _deb_import_impl(rctx):
     )
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
-    cc_import_targets, outs, symlinks = _discover_contents(
+    cc_import_targets, outs, symlinks, self_symlinks = _discover_contents(
         rctx,
         rctx.attr.depends_on,
         json.decode(rctx.attr.depends_file_map),
@@ -427,7 +429,8 @@ def _deb_import_impl(rctx):
         cc_import_targets = cc_import_targets,
         outs = outs,
         foreign_symlinks = foreign_symlinks,
-        symlink_outs = symlinks.keys(),
+        self_symlinks = self_symlinks,
+        symlink_outs = symlinks.keys() + self_symlinks.keys(),
     ))
 
 deb_import = repository_rule(
