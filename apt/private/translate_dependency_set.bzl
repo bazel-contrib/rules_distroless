@@ -175,9 +175,13 @@ def dependency_set_package_selects(packages, dependency_set):
 
     return selects
 
-def _dependency_set_package_keys(packages, dependency_set, architectures):
+def dependency_set_transitive_package_keys(packages, dependency_set, architectures):
     keys = {}
     pending = []
+    allowed_architectures = {
+        architecture: True
+        for architecture in architectures
+    }
 
     for architecture in architectures:
         entries = dependency_set["sets"].get(architecture, {})
@@ -197,7 +201,15 @@ def _dependency_set_package_keys(packages, dependency_set, architectures):
                 fail("illegal state: package %s is not in lockfile" % package_key)
 
             keys[package_key] = True
-            pending.extend(packages[package_key]["depends_on"])
+
+            # Keep unpack closure architecture-scoped even when traversing from
+            # architecture = all packages with mixed-arch dependency metadata.
+            for dep_key in packages[package_key]["depends_on"]:
+                if dep_key not in packages:
+                    fail("illegal state: package %s is not in lockfile" % dep_key)
+                dep_arch = packages[dep_key]["architecture"]
+                if dep_arch in allowed_architectures:
+                    pending.append(dep_key)
 
     if pending:
         fail("dependency traversal for unpack package keys did not converge")
@@ -306,7 +318,7 @@ def _unpack(rctx, packages, dependency_set, sources, mergedusr):
         if make_work_dir.return_code != 0:
             fail("Failed creating unpack work dir {}".format(work_dir))
 
-        package_keys = _dependency_set_package_keys(packages, dependency_set, [architecture, "all"])
+        package_keys = dependency_set_transitive_package_keys(packages, dependency_set, [architecture, "all"])
         for package_key in package_keys:
             package = packages[package_key]
             deb_path = "{}/{}.deb".format(work_dir, util.sanitize(package_key))

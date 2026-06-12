@@ -1,7 +1,7 @@
 "unit tests for dependency set translation"
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//apt/private:translate_dependency_set.bzl", "dependency_set_package_selects")
+load("//apt/private:translate_dependency_set.bzl", "dependency_set_package_selects", "dependency_set_transitive_package_keys")
 load("//apt/private:util.bzl", "util")
 
 _TEST_SUITE_PREFIX = "translate_dependency_set/"
@@ -84,7 +84,85 @@ def _package_repo_name_modes_test(ctx):
 
 package_repo_name_modes_test = unittest.make(_package_repo_name_modes_test)
 
+def _dependency_closure_arch_filter_test(ctx):
+    env = unittest.begin(ctx)
+
+    packages = {
+        "/noble/app:amd64=1": {
+            "architecture": "amd64",
+            "depends_on": [
+                "/noble/libc6:amd64=1",
+                "/noble/shared-tools:all=1",
+            ],
+        },
+        "/noble/app:arm64=1": {
+            "architecture": "arm64",
+            "depends_on": [
+                "/noble/libc6:arm64=1",
+                "/noble/shared-tools:all=1",
+            ],
+        },
+        "/noble/libc6:amd64=1": {
+            "architecture": "amd64",
+            "depends_on": [],
+        },
+        "/noble/libc6:arm64=1": {
+            "architecture": "arm64",
+            "depends_on": [],
+        },
+        "/noble/perl-base:amd64=1": {
+            "architecture": "amd64",
+            "depends_on": [],
+        },
+        "/noble/perl-base:arm64=1": {
+            "architecture": "arm64",
+            "depends_on": [],
+        },
+        "/noble/shared-tools:all=1": {
+            "architecture": "all",
+            "depends_on": [
+                "/noble/perl-base:amd64=1",
+                "/noble/perl-base:arm64=1",
+            ],
+        },
+    }
+
+    dependency_set = {
+        "sets": {
+            "amd64": {
+                "/noble/app:amd64": "1",
+            },
+            "arm64": {
+                "/noble/app:arm64": "1",
+            },
+            "all": {
+                "/noble/shared-tools:all": "1",
+            },
+        },
+    }
+
+    amd64_keys = dependency_set_transitive_package_keys(packages, dependency_set, ["amd64", "all"])
+    asserts.equals(env, [
+        "/noble/app:amd64=1",
+        "/noble/libc6:amd64=1",
+        "/noble/perl-base:amd64=1",
+        "/noble/shared-tools:all=1",
+    ], amd64_keys)
+
+    arm64_keys = dependency_set_transitive_package_keys(packages, dependency_set, ["arm64", "all"])
+    asserts.equals(env, [
+        "/noble/app:arm64=1",
+        "/noble/libc6:arm64=1",
+        "/noble/perl-base:arm64=1",
+        "/noble/shared-tools:all=1",
+    ], arm64_keys)
+
+    return unittest.end(env)
+
+dependency_closure_arch_filter_test = unittest.make(_dependency_closure_arch_filter_test)
+
 def translate_dependency_set_tests():
     package_selects_test(name = _TEST_SUITE_PREFIX + "package_selects")
     deduplicate_package_names_test(name = _TEST_SUITE_PREFIX + "deduplicate_package_names")
     package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")
+    dependency_closure_arch_filter_test(name = _TEST_SUITE_PREFIX + "dependency_closure_arch_filter")
