@@ -8,6 +8,13 @@ buildifier(
     mode = "diff",
 )
 
+buildifier(
+    name = "buildifier.fix",
+    exclude_patterns = ["./.git/*"],
+    lint_mode = "warn",
+    mode = "fix",
+)
+
 gazelle_binary(
     name = "gazelle_bin",
     languages = ["@bazel_skylib_gazelle_plugin//bzl"],
