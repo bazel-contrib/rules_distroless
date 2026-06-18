@@ -70,8 +70,58 @@ bzl_library(
 )
 
 bzl_library(
+    name = "translate_dependency_set",
+    srcs = ["translate_dependency_set.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = [
+        ":lockfile",
+        ":starlark_codegen_utils",
+        ":util",
+        "//apt:defs",
+        "//distroless:defs",
+    ],
+)
+
+bzl_library(
+    name = "deb_export",
+    srcs = ["deb_export.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = ["@aspect_bazel_lib//lib:tar"],
+)
+
+bzl_library(
+    name = "deb_translate_lock",
+    srcs = ["deb_translate_lock.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = [
+        ":lockfile",
+        ":starlark_codegen_utils",
+        ":util",
+    ],
+)
+
+bzl_library(
+    name = "so_library",
+    srcs = ["so_library.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = ["@rules_cc//cc:find_cc_toolchain"],
+)
+
+bzl_library(
+    name = "cc_deb_library",
+    srcs = ["cc_deb_library.bzl"],
+    visibility = ["//apt:__subpackages__"],
+)
+
+bzl_library(
     name = "deb_postfix",
     srcs = ["deb_postfix.bzl"],
+    visibility = ["//apt:__subpackages__"],
+)
+
+bzl_library(
+    name = "pkgconfig",
+    srcs = ["pkgconfig.bzl"],
     visibility = ["//apt:__subpackages__"],
 )
 
@@ -85,17 +135,4 @@ bzl_library(
     name = "util",
     srcs = ["util.bzl"],
     visibility = ["//apt:__subpackages__"],
-)
-
-bzl_library(
-    name = "translate_dependency_set",
-    srcs = ["translate_dependency_set.bzl"],
-    visibility = ["//apt:__subpackages__"],
-    deps = [
-        ":lockfile",
-        ":starlark_codegen_utils",
-        ":util",
-        "//apt:defs",
-        "//distroless:defs",
-    ],
 )

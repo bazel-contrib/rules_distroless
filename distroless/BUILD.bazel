@@ -18,3 +18,14 @@ bzl_library(
         "//distroless/private:passwd",
     ],
 )
+
+bzl_library(
+    name = "toolchains",
+    srcs = ["toolchains.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@bazel_lib//lib:repositories",
+        "@rules_java//java:repositories",
+        "@rules_java//java:rules_java_deps",
+    ],
+)
