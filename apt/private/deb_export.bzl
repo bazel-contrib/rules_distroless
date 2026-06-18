@@ -8,19 +8,19 @@ def _deb_export_impl(ctx):
     bsdtar = ctx.toolchains[TAR_TOOLCHAIN_TYPE]
 
     foreign_symlinks = {
-      symlink: json.decode(indices_json)
-      for (symlink, indices_json) in ctx.attr.foreign_symlinks.items()
+        symlink: json.decode(indices_json)
+        for (symlink, indices_json) in ctx.attr.foreign_symlinks.items()
     }
 
     # foreign_symlinks maps label -> index string (reversed for Bazel 7.0.0 compatibility)
     for (target, indices_json) in ctx.attr.foreign_symlinks.items():
         indices = json.decode(indices_json)
         for i in indices:
-          ctx.actions.symlink(
-              output = ctx.outputs.symlink_outs[i],
-              # grossly inefficient
-              target_file = target[DefaultInfo].files.to_list()[0],
-          )
+            ctx.actions.symlink(
+                output = ctx.outputs.symlink_outs[i],
+                # grossly inefficient
+                target_file = target[DefaultInfo].files.to_list()[0],
+            )
 
     if len(ctx.outputs.outs):
         fout = ctx.outputs.outs[0]
