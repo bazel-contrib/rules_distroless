@@ -5,6 +5,7 @@ load("//apt/private:apt_deb_repository.bzl", "deb_repository")
 load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
 load("//apt/private:deb_import.bzl", "deb_import")
 load("//apt/private:lockfile.bzl", "lockfile")
+load("//apt/private:sysroot_repository.bzl", "sysroot_repository")
 load("//apt/private:translate_dependency_set.bzl", "translate_dependency_set")
 load("//apt/private:util.bzl", "util")
 load("//apt/private:version_constraint.bzl", "version_constraint")
@@ -348,18 +349,24 @@ def _distroless_extension(mctx):
 
     resolution_queue = []
     already_resolved = {}
-    dependency_set_unpack = {}
     dependency_set_mergedusr = {}
+    sysroot_repos = []
     package_repo_roots = {
         False: {},
         True: {},
     }
 
     for mod in mctx.modules:
+        for sysroot_tag in mod.tags.sysroot:
+            sysroot_repos.append((
+                sysroot_tag.name,
+                sysroot_tag.dependency_set,
+                sysroot_tag.architecture,
+            ))
+
+    for mod in mctx.modules:
         for install in mod.tags.install:
             if install.dependency_set:
-                current = dependency_set_unpack.get(install.dependency_set, False)
-                dependency_set_unpack[install.dependency_set] = current or install.unpack
                 current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
                 dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
 
@@ -495,14 +502,26 @@ def _distroless_extension(mctx):
     package_repo_modes = _package_repo_modes(glock.packages(), package_repo_roots)
     for depset_name in dependency_sets.keys():
         depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
-        depset_unpack = dependency_set_unpack.get(depset_name, False)
+
         translate_dependency_set(
             name = depset_name,
             depset_name = depset_name,
             lock_content = lock_content,
-            unpack = depset_unpack,
             mergedusr = depset_mergedusr,
-            bsdtar = _bsdtar_label(mctx) if depset_unpack and depset_mergedusr else None,
+        )
+
+    # Generate separate sysroot repositories for each architecture
+    for (sysroot_name, depset_name, arch) in sysroot_repos:
+        if depset_name not in dependency_sets:
+            fail("apt.sysroot refers to unknown dependency_set '{}'. Add apt.install with the same dependency_set first.".format(depset_name))
+        depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
+        sysroot_repository(
+            name = sysroot_name,
+            depset_name = depset_name,
+            lock_content = lock_content,
+            architecture = arch,
+            mergedusr = depset_mergedusr,
+            bsdtar = _bsdtar_label(mctx) if depset_mergedusr else None,
         )
 
     # Generate a repo per package which will be aliased by hub repo.
@@ -597,7 +616,7 @@ apt.install(
 ```
 
 
-`apt.install` will install generate a package repository for each package and architecture
+`apt.install` generates a package repository for each package and architecture
 combination in the form of `@<TARGET_RELEASE>_<PKG_NAME>_<PKG_ARCH>`.
 
 Each `<PACKAGE>/<ARCH>` has two targets that match the usual structure of a
@@ -606,6 +625,39 @@ Debian package: `data` and `control`.
 You can use the package like so: `@<REPO>//<PACKAGE>/<ARCH>:<TARGET>`.
 
 E.g. for the previous example, you could use `@bullseye//perl/amd64:data`.
+
+## Creating Unpacked Sysroots
+
+To create unpacked sysroot repositories for use with toolchains like `toolchains_llvm`,
+use `apt.sysroot`. This creates a separate repository for the specified architecture:
+
+```starlark
+apt.install(
+    dependency_set = "my_sysroot",
+    packages = ["libc6", "libstdc++6"],
+    suites = ["noble"],
+    mergedusr = True,  # Required for toolchains_llvm
+)
+
+apt.sysroot(
+    dependency_set = "my_sysroot",
+    architecture = "amd64",
+    name = "my_sysroot_amd64",
+)
+apt.sysroot(
+    dependency_set = "my_sysroot",
+    architecture = "arm64",
+    name = "my_sysroot_arm64",
+)
+```
+
+This creates separate unpacked sysroot repositories:
+- `@my_sysroot_amd64` with unpacked content at `//sysroot`
+- `@my_sysroot_arm64` with unpacked content at `//sysroot`
+
+Each sysroot repository is independent and contains only the unpacked files for
+that specific architecture. The unpacking happens at repository fetch time, making
+the sysroots available to toolchains immediately.
 
 ### Lockfiles
 
@@ -670,8 +722,24 @@ install = tag_class(
         "dependency_set": attr.string(),
         "suites": attr.string_list(),
         "include_transitive": attr.bool(default = True),
-        "unpack": attr.bool(default = False),
         "mergedusr": attr.bool(default = False),
+    },
+)
+
+sysroot = tag_class(
+    attrs = {
+        "name": attr.string(
+            mandatory = True,
+            doc = "The name of the sysroot repository.",
+        ),
+        "dependency_set": attr.string(
+            mandatory = True,
+            doc = "The dependency set to create a sysroot for.",
+        ),
+        "architecture": attr.string(
+            mandatory = True,
+            doc = "The architecture to unpack the sysroot for.",
+        ),
     },
 )
 
@@ -689,6 +757,7 @@ apt = module_extension(
     tag_classes = {
         "install": install,
         "sources_list": sources_list,
+        "sysroot": sysroot,
         "lock": lock,
     },
 )

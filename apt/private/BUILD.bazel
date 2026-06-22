@@ -111,3 +111,15 @@ bzl_library(
         "//distroless:defs",
     ],
 )
+
+bzl_library(
+    name = "sysroot_repository",
+    srcs = ["sysroot_repository.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = [
+        ":lockfile",
+        ":translate_dependency_set",
+        ":util",
+    ],
+)
+
