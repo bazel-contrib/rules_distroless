@@ -52,14 +52,17 @@ bzl_library(
     name = "version",
     srcs = ["version.bzl"],
     visibility = ["//apt:__subpackages__"],
-    deps = ["@aspect_bazel_lib//lib:strings"],
+    deps = ["@bazel_lib//lib:strings"],
 )
 
 bzl_library(
     name = "deb_import",
     srcs = ["deb_import.bzl"],
     visibility = ["//apt:__subpackages__"],
-    deps = ["@bazel_tools//tools/build_defs/repo:http.bzl"],
+    deps = [
+        ":pkgconfig",
+        "@bazel_tools//tools/build_defs/repo:http.bzl",
+    ],
 )
 
 bzl_library(
@@ -104,7 +107,7 @@ bzl_library(
     name = "so_library",
     srcs = ["so_library.bzl"],
     visibility = ["//apt:__subpackages__"],
-    deps = ["@rules_cc//cc:find_cc_toolchain"],
+    deps = ["@rules_cc//cc:find_cc_toolchain_bzl"],
 )
 
 bzl_library(
