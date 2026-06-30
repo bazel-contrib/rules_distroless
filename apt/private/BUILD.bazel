@@ -61,7 +61,6 @@ bzl_library(
     visibility = ["//apt:__subpackages__"],
     deps = [
         ":pkgconfig",
-        "@bazel_tools//tools/build_defs/repo:http.bzl",
     ],
 )
 
