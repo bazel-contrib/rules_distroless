@@ -59,9 +59,7 @@ bzl_library(
     name = "deb_import",
     srcs = ["deb_import.bzl"],
     visibility = ["//apt:__subpackages__"],
-    deps = [
-        ":pkgconfig",
-    ],
+    deps = [":pkgconfig"],
 )
 
 bzl_library(
