@@ -86,7 +86,7 @@ check the following docs:
 
 # Adopters
 
-- [Google's `distroless` container images](https://github.com/GoogleContainerTools/distroless)
+- [Google's `distroless` container images]
 - [Arize AI](https://www.arize.com)
 
 > [!TIP]
@@ -101,5 +101,5 @@ check the following docs:
 [Bzlmod migration guide]: https://bazel.build/external/migration
 [`rules_distroless` Github releases page]: https://github.com/bazel-contrib/rules_distroless/releases
 [Update on the future stability of source code archives and hashes]: https://github.blog/2023-02-21-update-on-the-future-stability-of-source-code-archives-and-hashes
-[Google's `distroless` container images]: https://github.com/bazel-contrib/distroless
+[Google's `distroless` container images]: https://github.com/GoogleContainerTools/distroless
 [Arize AI]: https://www.arize.com
