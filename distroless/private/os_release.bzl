@@ -9,7 +9,7 @@ def os_release(
         name,
         content,
         path = "/usr/lib/os-release",
-        mode = "0555",
+        mode = "0644",
         time = "0",
         **kwargs):
     """

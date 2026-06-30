@@ -30,7 +30,7 @@ def _java_keystore_impl(ctx):
     mtree.add_parents("/etc/ssl/certs/java", mode = ctx.attr.mode, time = ctx.attr.time, skip = [1])
 
     # TODO: remove??
-    mtree.add_file("/etc/ssl/certs/java/cacerts", jks, mode = "0555", time = ctx.attr.time)
+    mtree.add_file("/etc/ssl/certs/java/cacerts", jks, mode = "0644", time = ctx.attr.time)
     mtree.build(output = output, mnemonic = "JavaKeyStore", inputs = [jks])
 
     return [

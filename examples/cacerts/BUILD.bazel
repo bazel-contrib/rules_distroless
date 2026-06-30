@@ -14,11 +14,11 @@ assert_tar_mtree(
 ./etc time=0.0 mode=755 gid=0 uid=0 type=dir
 ./etc/ssl time=0.0 mode=755 gid=0 uid=0 type=dir
 ./etc/ssl/certs time=0.0 mode=755 gid=0 uid=0 type=dir
-./etc/ssl/certs/ca-certificates.crt time=0.0 mode=555 gid=0 uid=0 type=file size=200313
+./etc/ssl/certs/ca-certificates.crt time=0.0 mode=644 gid=0 uid=0 type=file size=200313
 ./usr time=0.0 mode=755 gid=0 uid=0 type=dir
 ./usr/share time=0.0 mode=755 gid=0 uid=0 type=dir
 ./usr/share/doc time=0.0 mode=755 gid=0 uid=0 type=dir
 ./usr/share/doc/ca-certificates time=0.0 mode=755 gid=0 uid=0 type=dir
-./usr/share/doc/ca-certificates/copyright time=0.0 mode=555 gid=0 uid=0 type=file size=18940
+./usr/share/doc/ca-certificates/copyright time=0.0 mode=644 gid=0 uid=0 type=file size=18940
 """,
 )

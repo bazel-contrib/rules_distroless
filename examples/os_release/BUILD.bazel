@@ -23,7 +23,7 @@ assert_tar_mtree(
 #mtree
 ./usr time=0.0 mode=755 gid=0 uid=0 type=dir
 ./usr/lib time=0.0 mode=755 gid=0 uid=0 type=dir
-./usr/lib/os-release time=0.0 mode=555 gid=0 uid=0 type=file size=48
+./usr/lib/os-release time=0.0 mode=644 gid=0 uid=0 type=file size=48
 """,
 )
 
@@ -43,6 +43,6 @@ assert_tar_mtree(
     expected = """\
 #mtree
 ./etc time=0.0 mode=755 gid=0 uid=0 type=dir
-./etc/os-release time=0.0 mode=555 gid=0 uid=0 type=file size=67
+./etc/os-release time=0.0 mode=644 gid=0 uid=0 type=file size=67
 """,
 )

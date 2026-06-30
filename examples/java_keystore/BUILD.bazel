@@ -32,6 +32,6 @@ assert_tar_mtree(
 ./etc/ssl time=0.0 mode=755 gid=0 uid=0 type=dir
 ./etc/ssl/certs time=0.0 mode=755 gid=0 uid=0 type=dir
 ./etc/ssl/certs/java time=0.0 mode=755 gid=0 uid=0 type=dir
-./etc/ssl/certs/java/cacerts time=0.0 mode=555 gid=0 uid=0 type=file size=5349
+./etc/ssl/certs/java/cacerts time=0.0 mode=644 gid=0 uid=0 type=file size=5349
 """,
 )
