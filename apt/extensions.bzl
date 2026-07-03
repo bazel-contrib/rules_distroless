@@ -104,17 +104,23 @@ def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
     Returns None for optional Contents when all attempts fail.
     """
     failed_attempts = []
+    result = None
     for (ext, cmd, url, url_idx, ext_name, output, token) in tokens:
         download = token.wait()
         decompress_r = None
+        if result != None:
+            continue
         if download.success:
             decompress_r = mctx.execute(cmd + [output])
             if decompress_r.return_code == 0:
                 target_triple = "{}/{}/{}".format(dist, comp, arch)
 
                 # Decompressed file lives in its own ext_name subdirectory
-                return ("{}/{}/{}/{}".format(target_triple, url_idx, ext_name, index_type), url, download.integrity, ext)
+                result = ("{}/{}/{}/{}".format(target_triple, url_idx, ext_name, index_type), url, download.integrity, ext)
+                continue
         failed_attempts.append((url + "/.../" + index_type + ext, download, decompress_r))
+    if result != None:
+        return result
 
     if index_type == "Contents":
         # Contents files are optional; some repositories (e.g. packages.cloud.google.com/apt)
