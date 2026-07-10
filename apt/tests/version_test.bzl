@@ -95,6 +95,27 @@ def _sort_test(ctx):
 
 sort_test = unittest.make(_sort_test)
 
+def _parse_version_constraint_test(ctx):
+    parameters = [
+        (">= 1.1", (">=", "1.1")),
+        ("= 1.1", ("=", "1.1")),
+        ("=1.1", ("=", "1.1")),
+        ("<< 2.0", ("<<", "2.0")),
+        (">>2.0", (">>", "2.0")),
+    ]
+
+    env = unittest.begin(ctx)
+    for rawv, expected in parameters:
+        asserts.equals(
+            env,
+            expected,
+            version_constraint.parse_version_constraint(rawv),
+        )
+
+    return unittest.end(env)
+
+parse_version_constraint_test = unittest.make(_parse_version_constraint_test)
+
 def _is_satisfied_by_test(ctx):
     parameters = [
         (">= 1.1", "= 1.1", True),
@@ -123,5 +144,6 @@ is_satisfied_by_test = unittest.make(_is_satisfied_by_test)
 def version_tests():
     operators_test(name = _TEST_SUITE_PREFIX + "operators")
     parse_test(name = _TEST_SUITE_PREFIX + "parse")
+    parse_version_constraint_test(name = _TEST_SUITE_PREFIX + "parse_version_constraint")
     sort_test(name = _TEST_SUITE_PREFIX + "sort")
     is_satisfied_by_test(name = _TEST_SUITE_PREFIX + "is_satisfied_by")
