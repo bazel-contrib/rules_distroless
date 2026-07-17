@@ -144,6 +144,19 @@ def _sort(versions, reverse = False):
         vr = reversed(vr)
     return vr
 
+def _strip_binnmu(rv):
+    # A binNMU (binary-only non-maintainer upload) is a rebuild of an existing
+    # source package, e.g. to pick up a new library. 
+    # Stripping them is useful because some distros ship differently-binNMU-versioned versions
+    # of the same dependency for different architectures, but they should be treated as equal.
+    idx = rv.rfind("+b")
+    if idx == -1:
+        return rv
+    suffix = rv[idx + len("+b"):]
+    if suffix and suffix.isdigit():
+        return rv[:idx]
+    return rv
+
 version = struct(
     parse = _parse_version,
     cmp = lambda va, vb: _compare_version(va, vb),
@@ -153,4 +166,5 @@ version = struct(
     lte = lambda va, vb: _compare_version(va, vb) <= 0,
     eq = lambda va, vb: _compare_version(va, vb) == 0,
     sort = lambda versions, reverse = False: _sort(versions, reverse = reverse),
+    strip_binnmu = _strip_binnmu,
 )
