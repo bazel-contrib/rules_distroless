@@ -564,8 +564,8 @@ March 1st 2023.
 
 To use this services simply use a snapshot URL in the manifest. Here's two
 examples showing how to do this for Debian and Ubuntu:
-  * [/examples/debian_snapshot](/examples/debian_snapshot)
-  * [/examples/ubuntu_snapshot](/examples/ubuntu_snapshot)
+  * [/examples/debian_snapshot](https://github.com/bazel-contrib/rules_distroless/tree/main/examples/debian_snapshot)
+  * [/examples/ubuntu_snapshot](https://github.com/bazel-contrib/rules_distroless/tree/main/examples/ubuntu_snapshot)
 
 For more infomation, please check https://snapshot.debian.org and/or
 https://snapshot.ubuntu.com.
