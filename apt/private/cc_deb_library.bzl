@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "CcInfo", "cc_common")
+
 "cc_deb_library"
 
 def _cc_deb_library_impl(ctx):
