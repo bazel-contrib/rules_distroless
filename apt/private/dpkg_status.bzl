@@ -51,7 +51,7 @@ dpkg_status = rule(
             allow_single_file = True,
             executable = True,
             cfg = "exec",
-            default = "@gawk//:gawk",
+            default = "@ape//ape:awk",
         ),
     },
     implementation = _dpkg_status_impl,
