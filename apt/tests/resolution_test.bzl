@@ -65,6 +65,9 @@ def _parse_depends_test(ctx):
         "python3:any": [
             {"name": "python3", "version": None, "arch": ["any"]},
         ],
+        "intel-oneapi-common-vars (=2025.1.0-387)": [
+            {"name": "intel-oneapi-common-vars", "version": ("=", "2025.1.0-387"), "arch": None},
+        ],
         " | ".join([
             "gcc-i686-linux-gnu (>= 4:10.2)",
             "gcc:i386, g++-i686-linux-gnu (>= 4:10.2)",
