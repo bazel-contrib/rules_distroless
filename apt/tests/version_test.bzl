@@ -120,8 +120,37 @@ def _is_satisfied_by_test(ctx):
 
 is_satisfied_by_test = unittest.make(_is_satisfied_by_test)
 
+def _strip_binnmu_test(ctx):
+    parameters = {
+        # binNMU suffixes are stripped down to the source version.
+        "8.32-4+b1": "8.32-4",
+        "0.2.0-1+b1": "0.2.0-1",
+        "1.0+b12": "1.0",
+        "1.5~rc1+b2": "1.5~rc1",
+        # No binNMU suffix: returned unchanged.
+        "8.32-4": "8.32-4",
+        # "+deb11u1" is part of the source version, not a binNMU: kept.
+        "5.1-2+deb11u1": "5.1-2+deb11u1",
+        # Other "+..." suffixes are not binNMUs: kept.
+        "1.2.10+cvs20060429-1": "1.2.10+cvs20060429-1",
+        "7.0-035+1": "7.0-035+1",
+        # "+b" not followed by digits is not a binNMU: kept.
+        "1.0+b": "1.0+b",
+        "1.0+bfoo": "1.0+bfoo",
+    }
+
+    env = unittest.begin(ctx)
+
+    for v, expected in parameters.items():
+        asserts.equals(env, expected, version.strip_binnmu(v))
+
+    return unittest.end(env)
+
+strip_binnmu_test = unittest.make(_strip_binnmu_test)
+
 def version_tests():
     operators_test(name = _TEST_SUITE_PREFIX + "operators")
     parse_test(name = _TEST_SUITE_PREFIX + "parse")
     sort_test(name = _TEST_SUITE_PREFIX + "sort")
     is_satisfied_by_test(name = _TEST_SUITE_PREFIX + "is_satisfied_by")
+    strip_binnmu_test(name = _TEST_SUITE_PREFIX + "strip_binnmu")
