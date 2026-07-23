@@ -1,3 +1,0 @@
-# Tests for the new bzlmod API are done via the bookworm dependency_set
-# in the root MODULE.bazel. The old yaml-manifest based tests have been
-# removed as part of the new API migration.
