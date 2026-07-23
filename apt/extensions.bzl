@@ -14,22 +14,6 @@ ALL_SUPPORTED_ARCHES = ["armel", "armhf", "arm64", "i386", "amd64", "mips64el", 
 
 ITERATION_MAX = 2147483646
 
-def _parse_source(src):
-    parts = src.split(" ")
-    kind = parts.pop(0)
-    if parts[0].startswith("["):
-        # skip arch for now.
-        arch = parts.pop(0)
-    url = parts.pop(0)
-    dist = parts.pop(0)
-    components = parts
-    return struct(
-        kind = kind,
-        url = url,
-        dist = dist,
-        components = components,
-    )
-
 def _get_auth(mctx, urls):
     """Given the list of URLs obtain the correct auth dict."""
     if "NETRC" in mctx.os.environ:
