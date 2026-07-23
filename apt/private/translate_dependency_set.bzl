@@ -147,11 +147,11 @@ def _translate_dependency_set_impl(rctx):
     # Used to populate the root repo's _PACKAGES table.
     architectures_to_package_names = {}
 
-    # In some distros (e.g. Debian bookworm),
-    # the same package ships with different versions for different architectures.
-    # In those cases, if the versions are not just different binaries from the same source,
-    # we want to hard-error.
-    package_names_to_versions = {}
+    # Maps a package coordinates key (e.g. `(<package name>, <architecture>)` to its version.
+    #
+    # It is possible to specify multiple versions of a single dependency for a single architecture in a dependency set.
+    # In those cases, we want to hard-error.
+    package_coords_to_versions = {}
 
     for architecture in dependency_set["sets"].keys():
         architectures_to_package_names[architecture] = []
@@ -164,14 +164,15 @@ def _translate_dependency_set_impl(rctx):
 
             architectures_to_package_names[architecture].append(package_name)
 
-            source_version = version_lib.strip_binnmu(version)
-            recorded_version = package_names_to_versions.setdefault(package_name, source_version)
+            source_version = version
+            package_coords = (package_name, architecture)
+            recorded_version = package_coords_to_versions.setdefault(package_coords, source_version)
             if recorded_version != source_version:
-                fail("""Two different source versions detected for package {name}: {v1} and {v2}.
+                fail("""Two different source versions detected for package `{name}:{arch}` : {v1} and {v2}.
 This usually means that a distribution ships different versions of this dependency for different architectures.
 
 Please unify the versions manually, or use separate `apt.install` calls (with distinct `dependency_set` names) for each version of the dependency.
-""".format(name = package_name, v1 = recorded_version, v2 = source_version))
+""".format(name = package_name, arch = architecture, v1 = recorded_version, v2 = source_version))
 
             # Keyed by package name (not name+version): a package rebuilt with a
             # different binNMU per architecture is a single target whose data,
