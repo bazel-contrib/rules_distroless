@@ -372,8 +372,9 @@ def _distroless_extension(mctx):
 
         if not package:
             suite_msg = " in suite(s) [%s]" % ", ".join(suites) if suites else ""
+            version_str = "".join(version)
             fail(
-                "\n\nUnable to locate package `%s` for %s%s. It may only exist for specific set of architectures or suites. \n" % (name, arch, suite_msg) +
+                "\n\nUnable to locate package `%s` at version `%s` for %s%s. It may only exist for specific set of architectures or suites. \n" % (name, version_str, arch, suite_msg) +
                 "   1 - Ensure that the package is available for the specified architecture. \n" +
                 "   2 - Ensure that the specified version of the package is available for the specified architecture. \n" +
                 "   3 - Ensure that an apt.sources_list is added for the specified architecture.\n" +
