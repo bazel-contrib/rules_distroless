@@ -393,20 +393,28 @@ def _distroless_extension(mctx):
                 ),
             )
 
+        # Key every package by the architecture we are resolving for, not by the
+        # package's own `Architecture` field. 
+        # For arch-specific packages these are the same.
+        # For `Architecture: all` packages this "expands" them into one entry per target architecture,
+        # so each carries its own arch-specific dependency closure instead of a single frozen one shared across arches.
+        # This solves the cases where an `Architecture: all` package depends on a per-architecture package
+        # (e.g. bullseye ucf: https://packages.debian.org/bullseye/ucf).
+        #
         # TODO:
         # Ensure following statements are true.
         #  1- Package was resolved from a source that module listed explicitly.
         #  2- Package resolution was skipped because some other module asked for this package.
         #  3- 1) is enforced even if 2) is the case.
-        glock.add_package(package)
+        glock.add_package(package, arch)
 
-        pkg_short_key = lockfile.short_package_key(package)
+        pkg_short_key = lockfile.short_package_key(package, arch)
 
         already_resolved[pkg_short_key] = True
 
         for dep in dependencies:
-            glock.add_package(dep)
-            dep_key = lockfile.short_package_key(dep)
+            glock.add_package(dep, arch)
+            dep_key = lockfile.short_package_key(dep, arch)
             if dep_key not in already_resolved:
                 resolution_queue.append((
                     None,
@@ -415,7 +423,7 @@ def _distroless_extension(mctx):
                     arch,
                     suites,
                 ))
-            glock.add_package_dependency(package, dep)
+            glock.add_package_dependency(package, dep, arch)
 
         # Add it to dependency set
         if dependency_set_name:

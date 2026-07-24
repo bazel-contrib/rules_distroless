@@ -15,18 +15,30 @@ def _parse_package_key(key):
     (arch, version) = rest.split("=", 1)
     return (suite, name, arch, version)
 
-def _short_package_key(package):
+# `arch`, when set, overrides the package's own `Architecture` field for keying
+# purposes. This is how `Architecture: all` packages are "expanded": the same
+# package is keyed once per target architecture (e.g. `.../ucf:amd64` and
+# `.../ucf:arm64`) so each can carry its own architecture-specific dependency
+# closure.
+def _short_package_key(package, arch = None):
+    """Create a key for a given package.
+
+    `arch`, when set, overrides the package's own `Architecture` field in the key.
+    This is used to "expand" `Architecture: all` packages, to create one package per relevant architecture.
+    This allows `Architecture: all` packages that depend on per-architecture packages (e.g. `/bullseye/ucf`)
+    to create one dependency closure per architecture.
+    """
     return "/%s/%s:%s" % (
         package["Dist"],
         package["Package"],
-        package["Architecture"],
+        arch or package["Architecture"],
     )
 
-def _package_key(package):
-    return _make_package_key(package["Dist"], package["Package"], package["Version"], package["Architecture"])
+def _package_key(package, arch = None):
+    return _make_package_key(package["Dist"], package["Package"], package["Version"], arch or package["Architecture"])
 
-def _add_package(lock, package):
-    k = _package_key(package)
+def _add_package(lock, package, arch = None):
+    k = _package_key(package, arch)
     if k in lock.packages:
         return
     lock.packages[k] = {
@@ -41,11 +53,11 @@ def _add_package(lock, package):
         "depends_on": [],
     }
 
-def _add_package_dependency(lock, package, dependency):
-    k = _package_key(package)
+def _add_package_dependency(lock, package, dependency, arch = None):
+    k = _package_key(package, arch)
     if k not in lock.packages:
         fail("illegal state: %s is not in the lockfile." % package["Package"])
-    sk = _package_key(dependency)
+    sk = _package_key(dependency, arch)
     if sk in lock.packages[k]["depends_on"]:
         return
     lock.packages[k]["depends_on"].append(sk)
