@@ -223,10 +223,6 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
             formats[cnt_fk] = "unavailable"
 
 def _distroless_extension(mctx):
-    root_direct_deps = []
-    root_direct_dev_deps = []
-    reproducible = False
-
     # Detect facts API availability
     use_facts = hasattr(mctx, "facts")
     cached_facts = mctx.facts if use_facts else {}
