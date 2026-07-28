@@ -402,11 +402,18 @@ def _deb_import_impl(rctx):
         sha256 = rctx.attr.sha256,
     )
 
+    # Reconstruct the {package: [files]} dependency map by reading each
+    # dependency's own filemap (in depends_on order).
+    depends_file_map = {}
+    for (i, dep) in enumerate(rctx.attr.depends_on):
+        (suite, name, arch, version) = lockfile.parse_package_key(dep)
+        depends_file_map[name] = json.decode(rctx.read(rctx.path(rctx.attr.dep_filemaps[i])))
+
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
     cc_import_targets, outs, symlinks = _discover_contents(
         rctx,
         rctx.attr.depends_on,
-        json.decode(rctx.attr.depends_file_map),
+        depends_file_map,
         rctx.attr.package_name.removesuffix("-dev"),
     )
 
@@ -437,7 +444,7 @@ deb_import = repository_rule(
         "urls": attr.string_list(mandatory = True, allow_empty = False),
         "sha256": attr.string(),
         "depends_on": attr.string_list(),
-        "depends_file_map": attr.string(),
+        "dep_filemaps": attr.label_list(doc = "Each dependency's filemap.json, in depends_on order."),
         "mergedusr": attr.bool(),
         "target_name": attr.string(),
         "package_name": attr.string(),

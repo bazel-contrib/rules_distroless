@@ -3,6 +3,7 @@
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "read_user_netrc", "use_netrc")
 load("//apt/private:apt_deb_repository.bzl", "deb_repository")
 load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
+load("//apt/private:deb_filemap.bzl", "deb_filemap")
 load("//apt/private:deb_import.bzl", "deb_import")
 load("//apt/private:lockfile.bzl", "lockfile")
 load("//apt/private:translate_dependency_set.bzl", "translate_dependency_set")
@@ -425,13 +426,14 @@ def _distroless_extension(mctx):
 
     # Generate a repo per package which will be aliased by hub repo.
     for (package_key, package) in glock.packages().items():
-        filemap = {}
-        for key in package["depends_on"]:
-            (suite, name, arch, version) = lockfile.parse_package_key(key)
-            filemap[name] = repo.filemap(
-                name = name,
-                arch = arch,
-            )
+        (suite, name, arch, version) = lockfile.parse_package_key(package_key)
+
+        # Each package publishes its own file list in a leaf repo to avoid circular deps.
+        # Storing these in a file instead of passing filemaps as attributes cuts down lockfile size considerably.
+        deb_filemap(
+            name = util.sanitize(package_key) + "_filemap",
+            files = json.encode(repo.filemap(name = name, arch = arch) or []),
+        )
 
         deb_import(
             name = util.sanitize(package_key),
@@ -443,7 +445,12 @@ def _distroless_extension(mctx):
             sha256 = package["sha256"],
             mergedusr = False,
             depends_on = package["depends_on"],
-            depends_file_map = json.encode(filemap),
+            # Label of each dependency's own filemap, in depends_on order,
+            # so deb_import can rebuild the {file: dependency} index by lookup.
+            dep_filemaps = [
+                "@" + util.sanitize(dep) + "_filemap//:filemap.json"
+                for dep in package["depends_on"]
+            ],
             package_name = package["name"],
         )
 

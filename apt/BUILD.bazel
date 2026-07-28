@@ -21,6 +21,7 @@ bzl_library(
     deps = [
         "//apt/private:apt_deb_repository",
         "//apt/private:apt_dep_resolver",
+        "//apt/private:deb_filemap",
         "//apt/private:deb_import",
         "//apt/private:lockfile",
         "//apt/private:translate_dependency_set",
