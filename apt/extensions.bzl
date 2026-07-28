@@ -129,9 +129,14 @@ def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
         """.format(len(failed_attempts), "\n".join(attempt_messages)))
 
 def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
-    """Fetch all package indices and contents in parallel, then parse them."""
+    """Fetch all package indices and contents in parallel, then parse them.
+
+    Returns the set (as a dict) of fact keys that belong to the current sources,
+    so the caller can prune stale facts left behind by previous URLs.
+    """
     pending = []
     seen = {}
+    used_keys = {}
     for source_key, source in repo.sources().items():
         (urls, dist, component, architecture) = source
 
@@ -148,8 +153,10 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
         # redirects properly when a path contains "//"
         urls = [url.rstrip("/") for url in urls]
 
-        pkg_fact_key = dist + "/" + component + "/" + architecture + "/Packages"
-        cnt_fact_key = dist + "/" + component + "/" + architecture + "/Contents"
+        pkg_fact_key = util.index_fact_key(dist, component, architecture, "Packages", urls)
+        cnt_fact_key = util.index_fact_key(dist, component, architecture, "Contents", urls)
+        used_keys[pkg_fact_key] = True
+        used_keys[cnt_fact_key] = True
 
         # Check cached format info to avoid 404 warnings on subsequent runs
         cached_pkg_format = formats.get(pkg_fact_key)
@@ -222,6 +229,8 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
         else:
             formats[cnt_fk] = "unavailable"
 
+    return used_keys
+
 def _distroless_extension(mctx):
     # Detect facts API availability
     use_facts = hasattr(mctx, "facts")
@@ -277,8 +286,9 @@ def _distroless_extension(mctx):
     # Seed cached formats from facts (which extensions each remote serves)
     formats = dict(cached_facts.get("formats", {}))
 
-    # Fetch all sources_list in parallel and parse them.
-    _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats)
+    # Fetch all sources_list in parallel and parse them. `used_keys` is the set
+    # of fact keys for the current sources, used below to prune stale facts.
+    used_keys = _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats)
 
     sources = glock.sources()
     dependency_sets = glock.dependency_sets()
@@ -464,13 +474,14 @@ def _distroless_extension(mctx):
                 )
 
     if use_facts:
-        filtered_indices = {
-            k: v
-            for k, v in glock.facts().items()
-            if k.split("/")[0] in snapshot_suites
-        }
+        (cacheable_indices, cacheable_formats) = util.prune_uncacheable_facts(
+            glock.facts(),
+            formats,
+            used_keys,
+            snapshot_suites,
+        )
         return mctx.extension_metadata(
-            facts = {"indices": filtered_indices, "formats": formats},
+            facts = {"indices": cacheable_indices, "formats": cacheable_formats},
         )
 
 _doc = """
