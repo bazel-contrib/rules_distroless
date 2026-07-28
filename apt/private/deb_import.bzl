@@ -218,14 +218,15 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             for (symlink, symlink_target) in unresolved_symlinks.items():
                 if file == symlink_target:
                     unresolved_symlinks.pop(symlink)
-                    symlinks[symlink] = "@%s//:%s" % (util.sanitize(dep), file)
+                    symlinks[symlink] = "@{dep}//:{file}".format(
+                        dep = util.sanitize(dep),
+                        file = file
+                    )
 
     # Resolve self symlinks
-    self_symlinks = {}
     for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
         for (symlink, symlink_target) in unresolved_symlinks.items():
             if file == symlink_target:
-                self_symlinks[symlink] = symlinks.pop(symlink)
                 unresolved_symlinks.pop(symlink)
                 if len(unresolved_symlinks) == 0:
                     break
