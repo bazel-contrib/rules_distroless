@@ -204,32 +204,24 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         if resolved_symlink:
             symlinks[line] = resolved_symlink
 
-    # Resolve symlinks:
-    unresolved_symlinks = {} | symlinks
-
-    # TODO: this is highly inefficient, change the filemapping to be
-    # file -> package instead of package -> files
-    for dep in depends_on:
-        (suite, name, arch, _) = lockfile.parse_package_key(dep)
-        filemap = depends_file_map.get(name, []) or []
-        for file in filemap:
-            if len(unresolved_symlinks) == 0:
-                break
-            for (symlink, symlink_target) in unresolved_symlinks.items():
-                if file == symlink_target:
-                    unresolved_symlinks.pop(symlink)
-                    symlinks[symlink] = "@{dep}//:{file}".format(
-                        dep = util.sanitize(dep),
-                        file = file
-                    )
-
-    # Resolve self symlinks
-    for file in so_files + h_files + hpp_files + a_files + hpp_files_woext:
-        for (symlink, symlink_target) in unresolved_symlinks.items():
-            if file == symlink_target:
-                unresolved_symlinks.pop(symlink)
-                if len(unresolved_symlinks) == 0:
-                    break
+    # Resolve symlinks
+    # For each symlink, we check:
+    #  - If provided by a dependency -> rewrite to that dependency's label
+    #  - If shipped by this package  -> drop it from `symlinks` so it is emitted as a plain output
+    #  - Else                        -> leave unresolved, and warn
+    self_files = {
+        f: None
+        for f in so_files + h_files + hpp_files + a_files + hpp_files_woext
+    }
+    unresolved_symlinks = {}
+    for (symlink, symlink_target) in symlinks.items():
+        dep_repo = depends_file_map.get(symlink_target)
+        if dep_repo:
+            symlinks[symlink] = "@{dep}//:{file}".format(dep = dep_repo, file = symlink_target)
+        elif symlink_target in self_files:
+            symlinks.pop(symlink)
+        else:
+            unresolved_symlinks[symlink] = symlink_target
 
     if len(unresolved_symlinks):
         util.warning(
@@ -402,18 +394,20 @@ def _deb_import_impl(rctx):
         sha256 = rctx.attr.sha256,
     )
 
-    # Reconstruct the {package: [files]} dependency map by reading each
-    # dependency's own filemap (in depends_on order).
-    depends_file_map = {}
+    # Rebuild the {file: dependency_repo} index from each dependency's own filemap.
+    # The first dependency that provides a path wins.
+    provided_by = {}
     for (i, dep) in enumerate(rctx.attr.depends_on):
-        (suite, name, arch, version) = lockfile.parse_package_key(dep)
-        depends_file_map[name] = json.decode(rctx.read(rctx.path(rctx.attr.dep_filemaps[i])))
+        dep_repo = util.sanitize(dep)
+        for file in json.decode(rctx.read(rctx.path(rctx.attr.dep_filemaps[i]))):
+            if file not in provided_by:
+                provided_by[file] = dep_repo
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
     cc_import_targets, outs, symlinks = _discover_contents(
         rctx,
         rctx.attr.depends_on,
-        depends_file_map,
+        provided_by,
         rctx.attr.package_name.removesuffix("-dev"),
     )
 
@@ -443,8 +437,8 @@ deb_import = repository_rule(
     attrs = {
         "urls": attr.string_list(mandatory = True, allow_empty = False),
         "sha256": attr.string(),
-        "depends_on": attr.string_list(),
-        "dep_filemaps": attr.label_list(doc = "Each dependency's filemap.json, in depends_on order."),
+        "depends_on": attr.string_list(doc = "Names of packages this package depends on"),
+        "dep_filemaps": attr.label_list(doc = "Each dependency's filemap.json, in depends_on order, used to resolve cross-package symlinks."),
         "mergedusr": attr.bool(),
         "target_name": attr.string(),
         "package_name": attr.string(),
