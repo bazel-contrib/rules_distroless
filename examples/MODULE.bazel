@@ -103,6 +103,7 @@ apt.install(
         "ca-certificates",
         "coreutils",
         "dpkg",
+        "libbsd-dev",
         "libncurses6",
         "ncurses-base",
         "tzdata",

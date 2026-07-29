@@ -1,6 +1,7 @@
 "deb_import"
 
 load(":lockfile.bzl", "lockfile")
+load(":linker_script.bzl", "linker_script")
 load(":pkgconfig.bzl", "pkgconfig")
 load(":util.bzl", "util")
 
@@ -66,6 +67,7 @@ cc_library(
     additional_compiler_inputs = {additional_compiler_inputs},
     additional_linker_inputs = {additional_linker_inputs},
     includes = {includes},
+    linkopts = {linkopts},
     visibility = ["//visibility:public"],
 )
 """
@@ -144,6 +146,42 @@ def resolve_symlink(target_path, relative_symlink):
     resolved_path = "/".join(result_parts)
     return resolved_path
 
+# Scratch directory (inside the repo) into which we extract the files we need to
+# inspect on disk.
+_EXTRACT_DIR = "_extracted"
+
+def _remap_linkopts(rctx, extract_dir, so_regular_files, self_files, depends_file_map, target_name):
+    # Some .so files are GNU ld linker scripts (e.g. libc.so, libbsd.so) that
+    # reference libraries by absolute install path (e.g. /usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7).
+    # The hermetic linker cannot open those paths,
+    # so we emit --remap-inputs pointing at the Bazel-provided copy of each referenced file (in this package or a dependency).
+    # The candidate .so files are expected to have already been extracted into `extract_dir`.
+    if not so_regular_files:
+        return []
+
+    # `grep -I` skips binary (ELF) files, leaving only the text linker scripts.
+    scratch_paths = [extract_dir + "/" + so for so in so_regular_files]
+    grep = rctx.execute(
+        ["grep", "-I", "-l", "-e", "OUTPUT_FORMAT", "-e", "GROUP", "-e", "INPUT"] + scratch_paths,
+    )
+
+    referenced = []
+    for script_path in grep.stdout.splitlines():
+        referenced += linker_script.files_to_remap(rctx.read(script_path))
+
+    result = linker_script.remap_linkopts(referenced, self_files, depends_file_map, rctx.attr.name)
+
+    if len(result.unresolved):
+        util.warning(
+            rctx,
+            "some linker-script paths could not be resolved for {}. unresolved: {}".format(
+                target_name,
+                json.encode_indent(result.unresolved),
+            ),
+        )
+
+    return result.linkopts
+
 def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
     contents_raw = result.stdout.splitlines()
@@ -156,6 +194,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     pc_files = []
     o_files = []
     symlinks = {}
+    so_regular_files = []
 
     for line in contents_raw:
         # Skip directories
@@ -186,6 +225,10 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             if line.find("libthread_db") != -1:
                 continue
             so_files.append(line)
+
+            # Regular-file .so (not a symlink) may be a GNU ld linker script.
+            if resolved_symlink == None:
+                so_regular_files.append(line)
         elif line.endswith(".a") and line.find("lib"):
             a_files.append(line)
         elif line.endswith(".pc") and line.find("pkgconfig"):
@@ -217,7 +260,8 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
     for (symlink, symlink_target) in symlinks.items():
         dep_repo = depends_file_map.get(symlink_target)
         if dep_repo:
-            symlinks[symlink] = "@{dep}//:{file}".format(dep = dep_repo, file = symlink_target)
+            # dep_repo is a canonical repo name, so reference it with "@@".
+            symlinks[symlink] = "@@{dep}//:{file}".format(dep = dep_repo, file = symlink_target)
         elif symlink_target in self_files:
             symlinks.pop(symlink)
         else:
@@ -233,6 +277,26 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
             ),
         )
 
+    # Extract, in a single pass, the files we need to inspect on disk:
+    # - `.so` regular files because they may be linker scripts we need to inspect,
+    # - pkgconfig files because we need them to generate cc targets.
+    files_to_extract = so_regular_files + pc_files
+    if files_to_extract:
+        rctx.execute(["mkdir", "-p", _EXTRACT_DIR])
+        rctx.execute(
+            ["tar", "-xf", "data.tar.xz", "-C", _EXTRACT_DIR] +
+            ["./" + f for f in files_to_extract],
+        )
+
+    remap_linkopts = _remap_linkopts(
+        rctx,
+        _EXTRACT_DIR,
+        so_regular_files,
+        self_files,
+        depends_file_map,
+        target_name,
+    )
+
     outs = []
 
     for out in so_files + h_files + hpp_files + a_files + hpp_files_woext + o_files:
@@ -247,14 +311,9 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name):
         )
 
     pkgconfigs = []
-    if len(pc_files):
-        # TODO: use rctx.extract instead.
-        rctx.execute(
-            ["tar", "-xvf", "data.tar.xz"] + ["./" + pc for pc in pc_files],
-        )
-        for pc in pc_files:
-            if rctx.path(pc).exists:
-                pkgconfigs.append(pc)
+    for pc in pc_files:
+        if rctx.path(_EXTRACT_DIR + "/" + pc).exists:
+            pkgconfigs.append(pc)
 
     build_file_content = """
 so_library(
@@ -279,7 +338,7 @@ so_library(
         import_targets = []
 
         for pc_file in pkgconfigs:
-            pkgc = pkgconfig(rctx, pc_file)
+            pkgc = pkgconfig(rctx, _EXTRACT_DIR + "/" + pc_file)
             includes += pkgc.includes
             link_paths += pkgc.link_paths
 
@@ -339,7 +398,7 @@ so_library(
                 ] + [
                     "-Wl,-rpath=/" + rp
                     for rp in rpaths
-                ]
+                ] + remap_linkopts
             }.keys(),
             direct_deps = import_targets + [":_so_libs"],
             deps = deps,
@@ -353,13 +412,9 @@ so_library(
             additional_compiler_inputs = hpp_files_woext,
             additional_linker_inputs = so_files + a_files + o_files,
             includes = [],
+            linkopts = remap_linkopts,
         )
     else:
-        extra_linkopts = []
-        if target_name == "libbsd0":
-            extra_linkopts = [
-                "-Wl,--remap-inputs=/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7=$(BINDIR)/external/{}/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.7".format(rctx.attr.name),
-            ]
         build_file_content += _CC_SYS_LIBRARY_TMPL.format(
             name = target_name,
             hdrs = h_files + hpp_files,
@@ -382,7 +437,7 @@ so_library(
                 # Required for containers to find the dependencies at runtime.
                 "-Wl,-rpath=/" + rp
                 for rp in rpaths
-            ] + extra_linkopts,
+            ] + remap_linkopts,
             direct_deps = [":_so_libs"],
         )
 
@@ -394,12 +449,13 @@ def _deb_import_impl(rctx):
         sha256 = rctx.attr.sha256,
     )
 
-    # Rebuild the {file: dependency_repo} index from each dependency's own filemap.
+    # Rebuild the {file: canonical_name(dependency_repo)} index from each dependency's own filemap.
     # The first dependency that provides a path wins.
     provided_by = {}
-    for (i, dep) in enumerate(rctx.attr.depends_on):
-        dep_repo = util.sanitize(dep)
-        for file in json.decode(rctx.read(rctx.path(rctx.attr.dep_filemaps[i]))):
+    for i in range(len(rctx.attr.dep_filemaps)):
+        filemap_path = rctx.path(rctx.attr.dep_filemaps[i])
+        dep_repo = filemap_path.dirname.basename.removesuffix("_filemap")
+        for file in json.decode(rctx.read(filemap_path)):
             if file not in provided_by:
                 provided_by[file] = dep_repo
 

@@ -72,6 +72,16 @@ def _tokenize(content):
     return [token for token in content.split(" ") if token != ""]
 
 def _files_to_remap(content):
+    """Parse a GNU ld linker script and return the absolute library paths it references.
+
+    Args:
+        content: the text of a linker script (such as the contents of a .so file
+            that is actually an ld script).
+
+    Returns:
+        The list of absolute .so/.a paths referenced by the script's
+        INPUT/GROUP/AS_NEEDED commands. Relative sonames and -l flags are omitted.
+    """
     tokens = _tokenize(content)
 
     # At this point we have a flat token stream, e.g.:
@@ -114,6 +124,62 @@ def _files_to_remap(content):
 
     fail("End of iterations reached without successfully parsing linker script. More than {} tokens are not supported".format(_ITERATION_LIMIT))
 
+_MERGED_USR_ROOTS = ["lib/", "lib64/", "bin/", "sbin/"]
+
+def _installed_path_candidates(abs_path):
+    # Given an absolute path from a linker script,
+    # return the keys under which the referenced file might be listed,
+    # accounting for `usr/` in both directions (with and without the usr/ prefix).
+    norm = abs_path.removeprefix("/")
+    candidates = [norm]
+    for root in _MERGED_USR_ROOTS:
+        if norm.startswith(root):
+            candidates.append("usr/" + norm)
+            break
+    if norm.startswith("usr/"):
+        candidates.append(norm.removeprefix("usr/"))
+    return candidates
+
+def _resolve_installed_path(abs_path, self_files, depends_file_map, self_repo):
+    # Resolve a linker-script path to (repo, installed_path):
+    # If the referenced file is in the same package, return that.
+    # Otherwise, return any dependency that references it.
+    # Returns (None, None) if nothing provides it.
+    for candidate in _installed_path_candidates(abs_path):
+        if candidate in self_files:
+            return (self_repo, candidate)
+        if candidate in depends_file_map:
+            return (depends_file_map[candidate], candidate)
+    return (None, None)
+
+_REMAP_LINKOPT = "-Wl,--remap-inputs={abs}=$(BINDIR)/external/{repo}/{installed}"
+
+def _remap_linkopts(referenced_paths, self_files, depends_file_map, self_repo):
+    """Resolve absolute paths referenced by linker scripts into --remap-inputs linkopts.
+
+    Args:
+        referenced_paths: absolute paths referenced by linker scripts, e.g. the
+            output of files_to_remap.
+        self_files: paths shipped by the current repository (membership-tested).
+        depends_file_map: map of file path -> canonical name of the dependency
+            repository that ships it.
+        self_repo: canonical name of the current repository.
+
+    Returns:
+        A struct with fields `linkopts` ( -Wl,--remap-inputs=... flags, one per resolved path), and
+        `unresolved` (a list of unresolved paths).
+    """
+    linkopts = []
+    unresolved = []
+    for abs_path in sorted({p: None for p in referenced_paths}.keys()):
+        (repo, installed) = _resolve_installed_path(abs_path, self_files, depends_file_map, self_repo)
+        if repo == None:
+            unresolved.append(abs_path)
+            continue
+        linkopts.append(_REMAP_LINKOPT.format(abs = abs_path, repo = repo, installed = installed))
+    return struct(linkopts = linkopts, unresolved = unresolved)
+
 linker_script = struct(
     files_to_remap = _files_to_remap,
+    remap_linkopts = _remap_linkopts,
 )
