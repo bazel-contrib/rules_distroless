@@ -140,9 +140,9 @@ alias(
 # this scoping, a package's `depends_on` (which spans every architecture the
 # lockfile knows about) would leak foreign-architecture deps into a single
 # architecture's target, causing file duplication that confuses `flatten`.
-def package_deps_for_architecture(packages, package, architecture):
+def package_deps_for_architecture(packages, package, architecture, mergedusr = False):
     return [
-        "@" + util.sanitize(dep_key) + "//:data"
+        "@" + util.package_repo_name(dep_key, mergedusr = mergedusr) + "//:data"
         for dep_key in package["depends_on"]
         if packages[dep_key]["architecture"] in [architecture, "all"]
     ]
@@ -173,7 +173,7 @@ def _translate_dependency_set_impl(rctx):
 
         for (short_key, version) in dependency_set["sets"][architecture].items():
             package_key = short_key + "=" + version
-            repo_name = util.sanitize(package_key)
+            repo_name = util.package_repo_name(package_key, mergedusr = rctx.attr.mergedusr)
             package = packages[package_key]
             package_name = package["name"]
 
@@ -207,7 +207,7 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
                     data_targets = '"@%s//:data"' % repo_name,
                     control_targets = '"@%s//:control"' % repo_name,
                     src = '"@%s//:data"' % repo_name,
-                    deps = package_deps_for_architecture(packages, package, architecture),
+                    deps = package_deps_for_architecture(packages, package, architecture, mergedusr = rctx.attr.mergedusr),
                     urls = [
                         uri + "/" + package["filename"]
                         for uri in sources[package["suite"]]["uris"]
@@ -230,7 +230,7 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
             extra = _DEB_CC_IMPORT.format(
                 target_name = target_name,
                 selects = starlark_codegen_utils.to_dict_attr({
-                    "//:linux_%s" % architecture: "@%s//:%s" % (util.sanitize(package_key), target_name)
+                    "//:linux_%s" % architecture: "@%s//:%s" % (util.package_repo_name(package_key, mergedusr = rctx.attr.mergedusr), target_name)
                     for (architecture, package_key) in info.architectures.items()
                 }),
             )
@@ -270,6 +270,7 @@ translate_dependency_set = repository_rule(
     attrs = {
         "depset_name": attr.string(doc = "INTERNAL: DO NOT USE"),
         "lock_content": attr.string(doc = "INTERNAL: DO NOT USE"),
+        "mergedusr": attr.bool(default = False, doc = "INTERNAL: Whether package layers were normalized with merged-/usr semantics."),
         "package_template": attr.label(default = "//apt/private:package.BUILD.tmpl"),
     },
 )

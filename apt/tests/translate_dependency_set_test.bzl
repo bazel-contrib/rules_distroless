@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//apt/private:translate_dependency_set.bzl", "package_deps_for_architecture")
+load("//apt/private:util.bzl", "util")
 
 _TEST_SUITE_PREFIX = "translate_dependency_set/"
 
@@ -44,5 +45,22 @@ def _no_mixed_architectures_test(ctx):
 
 no_mixed_architectures_test = unittest.make(_no_mixed_architectures_test)
 
+# Regression test for commit "Add mergedusr support to apt.install()": package
+# repo names must be distinguishable per mergedusr mode so that the same
+# package can be materialized both with and without mergedusr normalization
+# when pulled in by different apt.install roots.
+def _package_repo_name_modes_test(ctx):
+    env = unittest.begin(ctx)
+
+    package_key = "/bullseye/bash:amd64=5.1"
+
+    asserts.equals(env, "bullseye_bash-amd64_5.1", util.package_repo_name(package_key))
+    asserts.equals(env, "bullseye_bash-amd64_5.1_mergedusr", util.package_repo_name(package_key, mergedusr = True))
+
+    return unittest.end(env)
+
+package_repo_name_modes_test = unittest.make(_package_repo_name_modes_test)
+
 def translate_dependency_set_tests():
     no_mixed_architectures_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures")
+    package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")

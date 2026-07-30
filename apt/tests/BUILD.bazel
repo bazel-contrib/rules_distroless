@@ -1,6 +1,7 @@
 load(":deb_postfix_test.bzl", "deb_postfix_tests")
 load(":dpkg_status_test.bzl", "dpkg_status_tests")
 load(":dpkg_statusd_test.bzl", "dpkg_statusd_tests")
+load(":extensions_test.bzl", "extensions_tests")
 load(":facts_test.bzl", "facts_tests")
 load(":linker_script_test.bzl", "linker_script_tests")
 load(":lockfile_test.bzl", "lockfile_tests")
@@ -25,3 +26,5 @@ linker_script_tests()
 lockfile_tests()
 
 translate_dependency_set_tests()
+
+extensions_tests()
