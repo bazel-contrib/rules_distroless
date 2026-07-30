@@ -66,6 +66,14 @@ def _has_package(lock, suite, name, version, arch):
     return _make_package_key(suite, name, version, arch) in lock.packages
 
 def _add_source(lock, suite, types, uris, components, architectures):
+    existing = lock.sources.get(suite)
+    if existing:
+        architectures = existing["architectures"] + [
+            arch
+            for arch in architectures
+            if arch not in existing["architectures"]
+        ]
+
     lock.sources[suite] = {
         "types": types,
         "uris": uris,
