@@ -6,6 +6,7 @@ load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
 load("//apt/private:deb_filemap.bzl", "deb_filemap")
 load("//apt/private:deb_import.bzl", "deb_import")
 load("//apt/private:lockfile.bzl", "lockfile")
+load("//apt/private:sysroot_repository.bzl", "sysroot_repository")
 load("//apt/private:translate_dependency_set.bzl", "translate_dependency_set")
 load("//apt/private:util.bzl", "util")
 load("//apt/private:version_constraint.bzl", "version_constraint")
@@ -329,6 +330,15 @@ def _distroless_extension(mctx):
         False: {},
         True: {},
     }
+    sysroot_repos = []
+
+    for mod in mctx.modules:
+        for sysroot_tag in mod.tags.sysroot:
+            sysroot_repos.append((
+                sysroot_tag.name,
+                sysroot_tag.dependency_set,
+                sysroot_tag.architecture,
+            ))
 
     for mod in mctx.modules:
         for install in mod.tags.install:
@@ -484,6 +494,17 @@ def _distroless_extension(mctx):
             mergedusr = depset_mergedusr,
         )
 
+    # Generate separate sysroot repositories for each architecture
+    for (sysroot_name, depset_name, arch) in sysroot_repos:
+        if depset_name not in dependency_sets:
+            fail("apt.sysroot refers to unknown dependency_set '{}'. Add apt.install with the same dependency_set first.".format(depset_name))
+        sysroot_repository(
+            name = sysroot_name,
+            depset_name = depset_name,
+            lock_content = lock_content,
+            architecture = arch,
+        )
+
     # Generate a repo per package which will be aliased by hub repo.
     for (package_key, package) in glock.packages().items():
         (suite, name, arch, version) = lockfile.parse_package_key(package_key)
@@ -593,6 +614,38 @@ You can use the package like so: `@<REPO>//<PACKAGE>/<ARCH>:<TARGET>`.
 
 E.g. for the previous example, you could use `@bullseye//perl/amd64:data`.
 
+## Creating Unpacked Sysroots
+
+To create unpacked sysroot repositories for use with toolchains like `toolchains_llvm`,
+use `apt.sysroot`. This creates a separate repository for the specified architecture:
+
+```starlark
+apt.install(
+    dependency_set = "my_sysroot",
+    packages = ["libc6", "libstdc++6"],
+    suites = ["noble"],
+)
+
+apt.sysroot(
+    dependency_set = "my_sysroot",
+    architecture = "amd64",
+    name = "my_sysroot_amd64",
+)
+apt.sysroot(
+    dependency_set = "my_sysroot",
+    architecture = "arm64",
+    name = "my_sysroot_arm64",
+)
+```
+
+This creates separate unpacked sysroot repositories:
+- `@my_sysroot_amd64` with unpacked content at `//sysroot`
+- `@my_sysroot_arm64` with unpacked content at `//sysroot`
+
+Each sysroot repository is independent and contains only the unpacked files for
+that specific architecture. The unpacking happens at repository fetch time, making
+the sysroots available to toolchains immediately.
+
 ### Lockfiles
 
 As mentioned, the macro can be used without a lock because the lock will be
@@ -660,6 +713,23 @@ install = tag_class(
     },
 )
 
+sysroot = tag_class(
+    attrs = {
+        "name": attr.string(
+            mandatory = True,
+            doc = "The name of the sysroot repository.",
+        ),
+        "dependency_set": attr.string(
+            mandatory = True,
+            doc = "The dependency set to create a sysroot for.",
+        ),
+        "architecture": attr.string(
+            mandatory = True,
+            doc = "The architecture to unpack the sysroot for.",
+        ),
+    },
+)
+
 lock = tag_class(
     attrs = {
         "into": attr.label(
@@ -674,6 +744,7 @@ apt = module_extension(
     tag_classes = {
         "install": install,
         "sources_list": sources_list,
+        "sysroot": sysroot,
         "lock": lock,
     },
 )

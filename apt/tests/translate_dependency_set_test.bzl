@@ -1,7 +1,7 @@
 "unit tests for dependency set translation"
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//apt/private:translate_dependency_set.bzl", "package_deps_for_architecture")
+load("//apt/private:translate_dependency_set.bzl", "dependency_set_transitive_package_keys", "package_deps_for_architecture")
 load("//apt/private:util.bzl", "util")
 
 _TEST_SUITE_PREFIX = "translate_dependency_set/"
@@ -12,7 +12,7 @@ _TEST_SUITE_PREFIX = "translate_dependency_set/"
 # package's `depends_on` (computed from the whole, possibly multi-arch,
 # lockfile) must only contribute deps that match the architecture being
 # built (or are architecture-independent).
-def _no_mixed_architectures_test(ctx):
+def _no_mixed_architectures_deps_test(ctx):
     env = unittest.begin(ctx)
 
     packages = {
@@ -43,7 +43,42 @@ def _no_mixed_architectures_test(ctx):
 
     return unittest.end(env)
 
-no_mixed_architectures_test = unittest.make(_no_mixed_architectures_test)
+no_mixed_architectures_deps_test = unittest.make(_no_mixed_architectures_deps_test)
+
+# A package depended on from an "all"-architecture entry point must not pull
+# in transitive dependencies that only exist for a foreign architecture, even
+# though the lockfile itself carries mixed-architecture dependency metadata.
+def _no_mixed_architectures_unpack_test(ctx):
+    env = unittest.begin(ctx)
+
+    packages = {
+        "/repo/root:all=1.0": {
+            "architecture": "all",
+            "depends_on": ["/repo/libfoo:amd64=1.0", "/repo/libfoo:arm64=1.0"],
+        },
+        "/repo/libfoo:amd64=1.0": {
+            "architecture": "amd64",
+            "depends_on": [],
+        },
+        "/repo/libfoo:arm64=1.0": {
+            "architecture": "arm64",
+            "depends_on": [],
+        },
+    }
+    dependency_set = {
+        "sets": {
+            "all": {"/repo/root:all": "1.0"},
+        },
+    }
+
+    keys = dependency_set_transitive_package_keys(packages, dependency_set, ["amd64", "all"])
+
+    asserts.true(env, "/repo/libfoo:amd64=1.0" in keys)
+    asserts.false(env, "/repo/libfoo:arm64=1.0" in keys)
+
+    return unittest.end(env)
+
+no_mixed_architectures_unpack_test = unittest.make(_no_mixed_architectures_unpack_test)
 
 # Regression test for commit "Add mergedusr support to apt.install()": package
 # repo names must be distinguishable per mergedusr mode so that the same
@@ -62,5 +97,6 @@ def _package_repo_name_modes_test(ctx):
 package_repo_name_modes_test = unittest.make(_package_repo_name_modes_test)
 
 def translate_dependency_set_tests():
-    no_mixed_architectures_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures")
+    no_mixed_architectures_deps_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures_deps")
+    no_mixed_architectures_unpack_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures_unpack")
     package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")

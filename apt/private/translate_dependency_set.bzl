@@ -148,6 +148,47 @@ def package_deps_for_architecture(packages, package, architecture, mergedusr = F
         if packages[dep_key]["architecture"] in [architecture, "all"]
     ]
 
+def dependency_set_transitive_package_keys(packages, dependency_set, architectures):
+    keys = {}
+    pending = []
+    allowed_architectures = {
+        architecture: True
+        for architecture in architectures
+    }
+
+    for architecture in architectures:
+        entries = dependency_set["sets"].get(architecture, {})
+        for (short_key, version) in entries.items():
+            pending.append(short_key + "=" + version)
+
+    for _ in range(len(packages)):
+        if not pending:
+            break
+
+        current = pending
+        pending = []
+        for package_key in current:
+            if package_key in keys:
+                continue
+            if package_key not in packages:
+                fail("illegal state: package %s is not in lockfile" % package_key)
+
+            keys[package_key] = True
+
+            # Keep closure architecture-scoped even when traversing from
+            # architecture = all packages with mixed-arch dependency metadata.
+            for dep_key in packages[package_key]["depends_on"]:
+                if dep_key not in packages:
+                    fail("illegal state: package %s is not in lockfile" % dep_key)
+                dep_arch = packages[dep_key]["architecture"]
+                if dep_arch in allowed_architectures:
+                    pending.append(dep_key)
+
+    if pending:
+        fail("dependency traversal for package keys did not converge")
+
+    return sorted(keys.keys())
+
 def _translate_dependency_set_impl(rctx):
     package_template = rctx.read(rctx.attr.package_template)
     lockf = lockfile.from_json(rctx, rctx.attr.lock_content)
