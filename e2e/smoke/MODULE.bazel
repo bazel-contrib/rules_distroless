@@ -83,5 +83,4 @@ apt.install(
         "cloud-sdk",
     ],
 )
-apt.lock(into = ":bullseye.lock.json")
 use_repo(apt, "bullseye")
