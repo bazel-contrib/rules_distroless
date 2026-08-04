@@ -20,6 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Bazel versions used in BCR presubmit
+        bazel-version: [7.x, 8.x]
         os: [ubuntu-latest, macos-latest]
         workspace:
           - dir: "."
@@ -32,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: bazel-contrib/setup-bazel@0.19.0
-      - run: bazel test //...
+      - run: USE_BAZEL_VERSION=${{ matrix.bazel-version}} bazel test //...
         working-directory: ${{ matrix.workspace.dir }}
       - name: Upload test logs
         if: failure()
