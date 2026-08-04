@@ -16,31 +16,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-macos:
-    runs-on: macos-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        workspace:
+          - dir: "."
+            name: root
+          - dir: examples
+            name: examples
+          - dir: e2e/smoke
+            name: e2e-smoke
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: bazel-contrib/setup-bazel@0.15.0
+      - uses: actions/checkout@v7.0.1
+      - uses: bazel-contrib/setup-bazel@0.19.0
       - run: bazel test //...
+        working-directory: ${{ matrix.workspace.dir }}
       - name: Upload test logs
         if: failure()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: test-logs-macos
-          path: bazel-testlogs/**/test.log
+          name: test-logs-${{ matrix.os }}-${{ matrix.workspace.name }}
+          path: ${{ matrix.workspace.dir }}/bazel-testlogs/**/test.log
           if-no-files-found: ignore
           retention-days: 5
-  test-linux:
+
+  # Single job to use as a required status check, since the matrix job names
+  # above vary and can't be pinned individually in branch protection rules.
+  ci:
+    if: always()
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bazel-contrib/setup-bazel@0.15.0
-      - run: bazel test //...
-      - name: Upload test logs
-        if: failure()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: test-logs-linux
-          path: bazel-testlogs/**/test.log
-          if-no-files-found: ignore
-          retention-days: 5
+      - name: Check matrix job results
+        run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "One or more matrix jobs failed: ${{ needs.test.result }}"
+            exit 1
+          fi
