@@ -110,10 +110,10 @@ assert_tar_listing(
     name = "test_flatten_dedup_listing",
     actual = "flatten_dedup",
     expected = """\
-flatten/
-flatten/dir/
-flatten/dir/changelog
-flatten/dir/sub/
-flatten/dir/sub/content.txt
+./flatten/
+./flatten/dir/
+./flatten/dir/changelog
+./flatten/dir/sub/
+./flatten/dir/sub/content.txt
 """,
 )
