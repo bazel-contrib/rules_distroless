@@ -232,6 +232,34 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
 
     return used_keys
 
+def compute_package_repo_modes(packages, roots_by_mode):
+    modes = {}
+
+    for (mergedusr, roots) in roots_by_mode.items():
+        pending = roots.keys()
+        seen = {}
+
+        for _ in range(len(packages)):
+            if not pending:
+                break
+
+            current = pending
+            pending = []
+            for package_key in current:
+                if package_key in seen:
+                    continue
+                if package_key not in packages:
+                    fail("illegal state: package %s is not in lockfile" % package_key)
+
+                seen[package_key] = True
+                modes.setdefault(package_key, {})[mergedusr] = True
+                pending.extend(packages[package_key]["depends_on"])
+
+        if pending:
+            fail("dependency traversal for package repository generation did not converge")
+
+    return modes
+
 def _distroless_extension(mctx):
     # Detect facts API availability
     use_facts = hasattr(mctx, "facts")
@@ -296,9 +324,18 @@ def _distroless_extension(mctx):
 
     resolution_queue = []
     already_resolved = {}
+    dependency_set_mergedusr = {}
+    package_repo_roots = {
+        False: {},
+        True: {},
+    }
 
     for mod in mctx.modules:
         for install in mod.tags.install:
+            if install.dependency_set:
+                current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
+                dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
+
             for dep_constraint in install.packages:
                 constraint = version_constraint.parse_dep(dep_constraint)
                 architectures = constraint["arch"]
@@ -327,6 +364,8 @@ def _distroless_extension(mctx):
                             constraint["version"],
                             "amd64",
                             install.suites,
+                            install.mergedusr,
+                            False,
                         ))
                         continue
 
@@ -340,6 +379,8 @@ def _distroless_extension(mctx):
                         constraint["version"],
                         arch,
                         install.suites,
+                        install.mergedusr,
+                        False,
                     ))
 
     for i in range(0, ITERATION_MAX + 1):
@@ -348,7 +389,7 @@ def _distroless_extension(mctx):
         if i == ITERATION_MAX:
             fail("apt.install exhausted, please file a bug")
 
-        (dependency_set_name, name, version, arch, suites) = resolution_queue.pop()
+        (dependency_set_name, name, version, arch, suites, mergedusr, is_transitive_dependency) = resolution_queue.pop()
 
         mctx.report_progress("Resolving %s:%s" % (name, arch))
 
@@ -400,6 +441,10 @@ def _distroless_extension(mctx):
         #  3- 1) is enforced even if 2) is the case.
         glock.add_package(package, arch)
 
+        package_key = lockfile.package_key(package, arch)
+        if not is_transitive_dependency:
+            package_repo_roots[mergedusr][package_key] = True
+
         pkg_short_key = lockfile.short_package_key(package, arch)
 
         already_resolved[pkg_short_key] = True
@@ -414,6 +459,8 @@ def _distroless_extension(mctx):
                     ("=", dep["Version"]),
                     arch,
                     suites,
+                    mergedusr,
+                    True,
                 ))
             glock.add_package_dependency(package, dep, arch)
 
@@ -427,11 +474,14 @@ def _distroless_extension(mctx):
 
     # Generate a hub repo for every dependency set
     lock_content = glock.as_json()
+    package_repo_modes = compute_package_repo_modes(glock.packages(), package_repo_roots)
     for depset_name in dependency_sets.keys():
+        depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
         translate_dependency_set(
             name = depset_name,
             depset_name = depset_name,
             lock_content = lock_content,
+            mergedusr = depset_mergedusr,
         )
 
     # Generate a repo per package which will be aliased by hub repo.
@@ -445,24 +495,30 @@ def _distroless_extension(mctx):
             files = json.encode(repo.filemap(name = name, arch = arch) or []),
         )
 
-        deb_import(
-            name = util.sanitize(package_key),
-            target_name = util.sanitize(package_key),
-            urls = [
-                uri + "/" + package["filename"]
-                for uri in sources[package["suite"]]["uris"]
-            ],
-            sha256 = package["sha256"],
-            mergedusr = False,
-            depends_on = package["depends_on"],
-            # Label of each dependency's own filemap, in depends_on order,
-            # so deb_import can rebuild the {file: dependency} index by lookup.
-            dep_filemaps = [
-                "@" + util.sanitize(dep) + "_filemap//:filemap.json"
-                for dep in package["depends_on"]
-            ],
-            package_name = package["name"],
-        )
+        modes = package_repo_modes.get(package_key, {False: True})
+        repo_variants = [(util.package_repo_name(package_key), False if False in modes else True)]
+        if True in modes:
+            repo_variants.append((util.package_repo_name(package_key, mergedusr = True), True))
+
+        for (repo_name, mergedusr) in repo_variants:
+            deb_import(
+                name = repo_name,
+                target_name = repo_name,
+                urls = [
+                    uri + "/" + package["filename"]
+                    for uri in sources[package["suite"]]["uris"]
+                ],
+                sha256 = package["sha256"],
+                mergedusr = mergedusr,
+                depends_on = package["depends_on"],
+                # Label of each dependency's own filemap, in depends_on order,
+                # so deb_import can rebuild the {file: dependency} index by lookup.
+                dep_filemaps = [
+                    "@" + util.sanitize(dep) + "_filemap//:filemap.json"
+                    for dep in package["depends_on"]
+                ],
+                package_name = package["name"],
+            )
 
     if not use_facts:
         for mod in mctx.modules:
@@ -527,7 +583,7 @@ apt.install(
 ```
 
 
-`apt.install` will install generate a package repository for each package and architecture
+`apt.install` generates a package repository for each package and architecture
 combination in the form of `@<TARGET_RELEASE>_<PKG_NAME>_<PKG_ARCH>`.
 
 Each `<PACKAGE>/<ARCH>` has two targets that match the usual structure of a
@@ -600,6 +656,7 @@ install = tag_class(
         "dependency_set": attr.string(),
         "suites": attr.string_list(),
         "include_transitive": attr.bool(default = True),
+        "mergedusr": attr.bool(default = False),
     },
 )
 
