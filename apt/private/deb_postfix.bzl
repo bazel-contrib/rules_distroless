@@ -35,7 +35,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
     # https://salsa.debian.org/md/usrmerge/-/tree/master/debian?ref_type=heads
     if mergedusr:
         toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"]
-        tools.append("@gawk//:gawk")
+        tools.append("@ape//ape:awk")
         apply = """\
             $(BSDTAR_BIN) --confirmation --gzip --options 'gzip:!timestamp' -cf "$$layer" \
             -s "#^\\./bin/\\(.\\)#./usr/bin/\\1#" \
@@ -45,7 +45,7 @@ def deb_postfix(name, srcs, outs, mergedusr = False, **kwargs):
             -s "#^\\./lib64/\\(.\\)#./usr/lib64/\\1#" \
             -s "#^\\./libx32/\\(.\\)#./usr/libx32/\\1#" \
             "@$$data_file" 2< <(
-                $(BSDTAR_BIN) -tvf "$$data_file" | $(location @gawk//:gawk) '{
+                $(BSDTAR_BIN) -tvf "$$data_file" | $(location @ape//ape:awk) '{
                     ORS=""
                     keep="y"
                     if (substr($$1, 1, 1) == "d" && (\\
