@@ -48,7 +48,7 @@ jobs:
   # Single job to use as a required status check, since the matrix job names
   # above vary and can't be pinned individually in branch protection rules.
   ci:
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [test]
     runs-on: ubuntu-latest
     steps:
