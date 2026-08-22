@@ -37,10 +37,24 @@ def _short_package_key(package, arch = None):
 def _package_key(package, arch = None):
     return _make_package_key(package["Dist"], package["Package"], package["Version"], arch or package["Architecture"])
 
-def _add_package(lock, package, arch = None):
-    k = _package_key(package, arch)
-    if k in lock.packages:
+def _package_identity(name, arch):
+    return "%s:%s" % (name, arch)
+
+def _index_packages(packages):
+    package_index = {}
+    for package_key in packages:
+        (_, name, arch, _) = _parse_package_key(package_key)
+        identity = _package_identity(name, arch)
+        if identity not in package_index:
+            package_index[identity] = package_key
+    return package_index
+
+def _add_package(lock, package_index, package, arch = None):
+    target_arch = arch or package["Architecture"]
+    identity = _package_identity(package["Package"], target_arch)
+    if identity in package_index:
         return
+    k = _package_key(package, arch)
     lock.packages[k] = {
         "name": package["Package"],
         "version": package["Version"],
@@ -52,12 +66,16 @@ def _add_package(lock, package, arch = None):
         "size": int(package["Size"]),
         "depends_on": [],
     }
+    package_index[identity] = k
 
-def _add_package_dependency(lock, package, dependency, arch = None):
-    k = _package_key(package, arch)
-    if k not in lock.packages:
+def _add_package_dependency(lock, package_index, package, dependency, arch = None):
+    target_arch = arch or package["Architecture"]
+    k = package_index.get(_package_identity(package["Package"], target_arch))
+    if not k:
         fail("illegal state: %s is not in the lockfile." % package["Package"])
-    sk = _package_key(dependency, arch)
+    sk = package_index.get(_package_identity(dependency["Package"], target_arch))
+    if not sk:
+        fail("illegal state: %s is not in the lockfile." % dependency["Package"])
     if sk in lock.packages[k]["depends_on"]:
         return
     lock.packages[k]["depends_on"].append(sk)
@@ -82,11 +100,12 @@ def _add_source(lock, suite, types, uris, components, architectures):
     }
 
 def _create(mctx, lock):
+    package_index = _index_packages(lock.packages)
     return struct(
         has_package = lambda *args, **kwargs: _has_package(lock, *args, **kwargs),
         add_source = lambda *args, **kwargs: _add_source(lock, *args, **kwargs),
-        add_package = lambda *args, **kwargs: _add_package(lock, *args, **kwargs),
-        add_package_dependency = lambda *args, **kwargs: _add_package_dependency(lock, *args, **kwargs),
+        add_package = lambda *args, **kwargs: _add_package(lock, package_index, *args, **kwargs),
+        add_package_dependency = lambda *args, **kwargs: _add_package_dependency(lock, package_index, *args, **kwargs),
         packages = lambda: lock.packages,
         sources = lambda: lock.sources,
         dependency_sets = lambda: lock.dependency_sets,
@@ -126,15 +145,20 @@ def _from_json(mctx, content):
     return _create(mctx, lock)
 
 def _merge(mctx, locks):
-    mlock = _empty(mctx)
-    packages = mlock.packages()
-    facts = mlock.facts()
+    packages = {}
+    facts = {}
     for lock in locks:
         for (key, pkg) in lock.packages().items():
             packages[key] = pkg
         for (key, fact) in lock.facts().items():
             facts[key] = fact
-    return mlock
+    return _create(mctx, struct(
+        version = 2,
+        dependency_sets = {},
+        packages = packages,
+        sources = {},
+        facts = facts,
+    ))
 
 lockfile = struct(
     empty = _empty,
