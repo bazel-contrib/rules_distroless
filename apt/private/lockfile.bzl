@@ -58,6 +58,8 @@ def _add_package_dependency(lock, package, dependency, arch = None):
     if k not in lock.packages:
         fail("illegal state: %s is not in the lockfile." % package["Package"])
     sk = _package_key(dependency, arch)
+    if sk not in lock.packages:
+        fail("illegal state: %s is not in the lockfile." % dependency["Package"])
     if sk in lock.packages[k]["depends_on"]:
         return
     lock.packages[k]["depends_on"].append(sk)
