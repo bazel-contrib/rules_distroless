@@ -78,10 +78,10 @@ We also have `distroless`-specific rules that could be useful:
 To read more specific documentation for each of the rules in the repo please
 check the following docs:
 
-- [apt](https://registry.bazel.build/docs/rules_distroless#apt-defs-bzl): repository rule for installing Debian/Ubuntu packages.
-- [apt macro](https://registry.bazel.build/docs/rules_distroless#apt-apt-bzl): legacy macro for installing Debian/Ubuntu
+- [apt](https://registry.bazel.build/modules/rules_distroless/latest/docs#apt-defs-bzl): repository rule for installing Debian/Ubuntu packages.
+- [apt macro](https://registry.bazel.build/modules/rules_distroless/latest/docs#apt-apt-bzl): legacy macro for installing Debian/Ubuntu
   packages.
-- [rules](https://registry.bazel.build/docs/rules_distroless#distroless-defs-bzl): various helper rules to aid with creating a Linux /
+- [rules](https://registry.bazel.build/modules/rules_distroless/latest/docs#distroless-defs-bzl): various helper rules to aid with creating a Linux /
   Debian installation from scratch.
 
 # Adopters
