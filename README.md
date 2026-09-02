@@ -65,6 +65,9 @@ The [examples](/examples) demonstrate how to accomplish typical tasks such as
 - [apt-get install](/examples/debian_snapshot) from Debian repositories.
 - [apt-get install](/examples/ubuntu_snapshot) from Ubuntu repositories.
 
+You can create sysroots for toolchains_llvm on the fly using rules_distroless.
+See [examples/sysroot/README.md](examples/sysroot/README.md) for more details.
+
 We also have `distroless`-specific rules that could be useful:
 
 - [flatten](/examples/flatten): flatten multiple `tar` archives.

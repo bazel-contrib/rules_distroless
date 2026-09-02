@@ -133,20 +133,92 @@ alias(
 )
 """
 
-# Computes the `@repo//:data` labels a package's per-architecture BUILD.bazel
-# should depend on for the given architecture.
+# Builds the fully-qualified package key (`<short_key>=<version>`) used to
+# index into the lockfile's `packages` map from a dependency_set's per-
+# architecture `{short_key: version}` entries.
+def _package_key(short_key, version):
+    return short_key + "=" + version
+
+# Returns the `depends_on` keys of `package` whose architecture is present in
+# `allowed_architectures` (a set-like dict of architecture -> True).
 #
 # Avoids mixing architectures: a dependency is only included if it was built
-# for this exact architecture, or is architecture-independent ("all"). Without
+# for an allowed architecture, or is architecture-independent ("all"). Without
 # this scoping, a package's `depends_on` (which spans every architecture the
 # lockfile knows about) would leak foreign-architecture deps into a single
-# architecture's target, causing file duplication that confuses `flatten`.
-def package_deps_for_architecture(packages, package, architecture, mergedusr = False):
+# architecture's target/closure, causing file duplication that confuses
+# `flatten`.
+def _package_dep_keys_for_architectures(packages, package, allowed_architectures):
+    return [
+        dep_key
+        for dep_key in package["depends_on"]
+        if packages[dep_key]["architecture"] in allowed_architectures
+    ]
+
+# Computes the `@repo//:data` labels a package's per-architecture BUILD.bazel
+# should depend on for the given architecture.
+def _package_deps_for_architecture(packages, package, architecture, mergedusr = False):
+    allowed_architectures = {architecture: True, "all": True}
     return [
         "@" + util.package_repo_name(dep_key, mergedusr = mergedusr) + "//:data"
-        for dep_key in package["depends_on"]
-        if packages[dep_key]["architecture"] in [architecture, "all"]
+        for dep_key in _package_dep_keys_for_architectures(packages, package, allowed_architectures)
     ]
+
+# Validates a dependency_set against the lockfile's `packages` map.
+def verify_dependency_set(packages, dependency_set):
+    package_coords_to_versions = {}
+
+    for (architecture, entries) in dependency_set["sets"].items():
+        for (short_key, version) in entries.items():
+            package_key = _package_key(short_key, version)
+            if package_key not in packages:
+                    fail("illegal state: package %s is not in lockfile" % package_key)
+
+            package_name = packages[package_key]["name"]
+            package_coords = (package_name, architecture)
+            recorded_version = package_coords_to_versions.setdefault(package_coords, version)
+            if recorded_version != version:
+                fail("""Two different source versions detected for package `{name}:{arch}` : {v1} and {v2}.
+This usually means that a distribution ships different versions of this dependency for different architectures.
+
+Please unify the versions manually, or use separate `apt.install` calls (with distinct `dependency_set` names) for each version of the dependency.
+""".format(name = package_name, arch = architecture, v1 = recorded_version, v2 = version))
+
+def dependency_set_transitive_package_keys(packages, dependency_set, architectures):
+    keys = {}
+    pending = []
+    allowed_architectures = {
+        architecture: True
+        for architecture in architectures
+    }
+
+    verify_dependency_set(packages, dependency_set)
+
+    for architecture in architectures:
+        entries = dependency_set["sets"].get(architecture, {})
+        for (short_key, version) in entries.items():
+            pending.append(_package_key(short_key, version))
+
+    for _ in range(len(packages)):
+        if not pending:
+            break
+
+        current = pending
+        pending = []
+        for package_key in current:
+            if package_key in keys:
+                continue
+
+            keys[package_key] = True
+
+            # Keep closure architecture-scoped even when traversing from
+            # architecture = all packages with mixed-arch dependency metadata.
+            pending.extend(_package_dep_keys_for_architectures(packages, packages[package_key], allowed_architectures))
+
+    if pending:
+        fail("dependency traversal for package keys did not converge")
+
+    return sorted(keys.keys())
 
 def _translate_dependency_set_impl(rctx):
     package_template = rctx.read(rctx.attr.package_template)
@@ -163,32 +235,18 @@ def _translate_dependency_set_impl(rctx):
     # Used to populate the root repo's _PACKAGES table.
     architectures_to_package_names = {}
 
-    # Maps a package coordinates key (e.g. `(<package name>, <architecture>)` to its version.
-    #
-    # It is possible to specify multiple versions of a single dependency for a single architecture in a dependency set.
-    # In those cases, we want to hard-error.
-    package_coords_to_versions = {}
+    verify_dependency_set(packages, dependency_set)
 
     for architecture in dependency_set["sets"].keys():
         architectures_to_package_names[architecture] = []
 
         for (short_key, version) in dependency_set["sets"][architecture].items():
-            package_key = short_key + "=" + version
+            package_key = _package_key(short_key, version)
             repo_name = util.package_repo_name(package_key, mergedusr = rctx.attr.mergedusr)
             package = packages[package_key]
             package_name = package["name"]
 
             architectures_to_package_names[architecture].append(package_name)
-
-            source_version = version
-            package_coords = (package_name, architecture)
-            recorded_version = package_coords_to_versions.setdefault(package_coords, source_version)
-            if recorded_version != source_version:
-                fail("""Two different source versions detected for package `{name}:{arch}` : {v1} and {v2}.
-This usually means that a distribution ships different versions of this dependency for different architectures.
-
-Please unify the versions manually, or use separate `apt.install` calls (with distinct `dependency_set` names) for each version of the dependency.
-""".format(name = package_name, arch = architecture, v1 = recorded_version, v2 = source_version))
 
             # Keyed by package name (not name+version): a package rebuilt with a
             # different binNMU per architecture is a single target whose data,
@@ -208,7 +266,7 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
                     data_targets = '"@%s//:data"' % repo_name,
                     control_targets = '"@%s//:control"' % repo_name,
                     src = '"@%s//:data"' % repo_name,
-                    deps = package_deps_for_architecture(packages, package, architecture, mergedusr = rctx.attr.mergedusr),
+                    deps = _package_deps_for_architecture(packages, package, architecture, mergedusr = rctx.attr.mergedusr),
                     urls = [
                         uri + "/" + package["filename"]
                         for uri in sources[package["suite"]]["uris"]
