@@ -461,7 +461,7 @@ def _distroless_extension(mctx):
                     ("=", dep["Version"]),
                     arch,
                     suites,
-                    install.include_transitive,
+                    include_transitive,
                     mergedusr,
                     True,
                 ))
