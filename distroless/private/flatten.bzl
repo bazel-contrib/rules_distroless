@@ -64,7 +64,7 @@ Deduplication is performed only for directories.
             allow_single_file = True,
             executable = True,
             cfg = "exec",
-            default = "@gawk//:gawk",
+            default = "@ape//ape:awk",
         ),
     },
     implementation = _flatten_impl,
