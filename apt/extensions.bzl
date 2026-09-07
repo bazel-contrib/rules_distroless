@@ -404,7 +404,7 @@ def _distroless_extension(mctx):
 
         if not package:
             suite_msg = " in suite(s) [%s]" % ", ".join(suites) if suites else ""
-            version_str = "".join(version)
+            version_str = "".join(version) if version else "any"
             fail(
                 "\n\nUnable to locate package `%s` at version `%s` for %s%s. It may only exist for specific set of architectures or suites. \n" % (name, version_str, arch, suite_msg) +
                 "   1 - Ensure that the package is available for the specified architecture. \n" +
