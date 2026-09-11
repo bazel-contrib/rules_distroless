@@ -11,7 +11,7 @@ _ROOT_BUILD_TMPL = """\
 load("@rules_distroless//apt:defs.bzl", "dpkg_status")
 load("@rules_distroless//distroless:defs.bzl", "flatten")
 
-exports_files(['packages.bzl'])
+exports_files(['lock.json'])
 
 # Map Debian architectures to platform CPUs.
 #
@@ -260,6 +260,7 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
             ),
         )
 
+    rctx.file("lock.json", rctx.attr.lock_content)
     rctx.file("BUILD.bazel", _ROOT_BUILD_TMPL.format(
         target_name = util.get_repo_name(rctx.attr.name),
         packages = starlark_codegen_utils.to_dict_list_attr(architectures_to_package_names),
