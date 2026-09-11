@@ -422,6 +422,7 @@ def _distroless_extension(mctx):
         # Storing these in a file instead of passing filemaps as attributes cuts down lockfile size considerably.
         deb_filemap(
             name = util.sanitize(package_key) + "_filemap",
+            package_key = package_key,
             urls = package["urls"],
             sha256 = package["sha256"],
         )
@@ -434,12 +435,11 @@ def _distroless_extension(mctx):
         for (repo_name, mergedusr) in repo_variants:
             deb_import(
                 name = repo_name,
-                target_name = repo_name,
                 urls = package["urls"],
                 sha256 = package["sha256"],
                 mergedusr = mergedusr,
-                depends_on = package["depends_on"],
-                # Dependency filemaps retain resolver order.
+                # Each filemap carries its package key, avoiding a second copy
+                # of every dependency list in MODULE.bazel.lock.
                 dep_filemaps = [
                     "@" + util.sanitize(dep) + "_filemap//:filemap.json"
                     for dep in package["depends_on"]

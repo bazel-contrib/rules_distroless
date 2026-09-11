@@ -16,12 +16,13 @@ def _deb_filemap_impl(rctx):
         fail("failed to list package files: %s" % result.stderr)
     rctx.delete("_archive")
     files = [path.removeprefix("./") for path in result.stdout.splitlines() if not path.endswith("/")]
-    rctx.file("filemap.json", json.encode(files))
+    rctx.file("filemap.json", json.encode({"package_key": rctx.attr.package_key, "files": files}))
     rctx.file("BUILD.bazel", 'exports_files(["filemap.json"], visibility = ["//visibility:public"])\n')
 
 deb_filemap = repository_rule(
     implementation = _deb_filemap_impl,
     attrs = {
+        "package_key": attr.string(mandatory = True),
         "urls": attr.string_list(mandatory = True, allow_empty = False),
         "sha256": attr.string(mandatory = True),
     },
