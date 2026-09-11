@@ -40,6 +40,8 @@ def _package_key(package, arch = None):
 def _add_package(lock, package, arch = None):
     k = _package_key(package, arch)
     if k in lock.packages:
+        # Refresh provenance from the selected index when reading an older lock.
+        lock.packages[k]["urls"] = [root + "/" + package["Filename"] for root in package["Roots"]]
         return
     lock.packages[k] = {
         "name": package["Package"],
@@ -47,6 +49,7 @@ def _add_package(lock, package, arch = None):
         "architecture": package["Architecture"],
         "sha256": package["SHA256"],
         "filename": package["Filename"],
+        "urls": [root + "/" + package["Filename"] for root in package["Roots"]],
         "suite": package["Dist"],
         "section": package["Section"],
         "size": int(package["Size"]),
@@ -115,6 +118,15 @@ def _from_json(mctx, content):
     lock = json.decode(content)
     if lock["version"] != 2:
         fail("lock file version %d is not supported anymore. please upgrade your lock file" % lock["version"])
+
+    # Existing v2 locks only recorded source URLs at suite granularity.
+    # Preserve their download locations until a selected index refreshes them.
+    for package in lock.get("packages", {}).values():
+        if "urls" not in package:
+            package["urls"] = [
+                root + "/" + package["filename"]
+                for root in lock["sources"][package["suite"]]["uris"]
+            ]
 
     lock = struct(
         version = lock["version"],

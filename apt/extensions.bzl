@@ -23,8 +23,8 @@ def _get_auth(mctx, urls):
         netrc = read_user_netrc(mctx)
     return use_netrc(netrc, urls, {})
 
-def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, cached_format = None):
-    """Initiate all format downloads for a given index type with block=False.
+def _start_downloads(mctx, urls, dist, comp, arch, integrity, source_id, cached_format = None):
+    """Initiate package index downloads with block=False.
 
     If cached_format is set, only that extension is attempted — avoiding
     404 warnings for formats the remote doesn't serve.
@@ -36,20 +36,12 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, cached
     #  --force      -> overwrite the output if it exists
     #  --decompress -> decompress
     # Order of these matter, we want to try the one that is most likely first.
-    if index_type == "Packages":
-        extensions = [
-            (".xz", ["xz", "--decompress", "--keep", "--force"]),
-            (".gz", ["gzip", "--decompress", "--keep", "--force"]),
-            (".bz2", ["bzip2", "--decompress", "--keep", "--force"]),
-            ("", ["true"]),
-        ]
-    else:
-        extensions = [
-            (".gz", ["gzip", "--decompress", "--keep", "--force"]),
-            (".xz", ["xz", "--decompress", "--keep", "--force"]),
-            (".bz2", ["bzip2", "--decompress", "--keep", "--force"]),
-            ("", ["true"]),
-        ]
+    extensions = [
+        (".xz", ["xz", "--decompress", "--keep", "--force"]),
+        (".gz", ["gzip", "--decompress", "--keep", "--force"]),
+        (".bz2", ["bzip2", "--decompress", "--keep", "--force"]),
+        ("", ["true"]),
+    ]
 
     if cached_format != None:
         extensions = [(ext, cmd) for (ext, cmd) in extensions if ext == cached_format]
@@ -63,11 +55,8 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, cached
             # Without this, the uncompressed variant ("") and a decompressed
             # .xz/.gz/.bz2 would both write to the same final path.
             ext_name = ext.lstrip(".") if ext else "raw"
-            output = "{}/{}/{}/{}{}".format(target_triple, url_idx, ext_name, index_type, ext)
-            if index_type == "Packages":
-                dist_url = "{}/dists/{}/{}/binary-{}/{}{}".format(url, dist, comp, arch, index_type, ext)
-            else:
-                dist_url = "{}/dists/{}/{}/Contents-{}{}".format(url, dist, comp, arch, ext)
+            output = "{}/{}/{}/{}/Packages{}".format(source_id, target_triple, url_idx, ext_name, ext)
+            dist_url = "{}/dists/{}/{}/binary-{}/Packages{}".format(url, dist, comp, arch, ext)
             auth = {}
             if url in base_auth:
                 auth = {dist_url: base_auth[url]}
@@ -79,18 +68,17 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, cached
                 auth = auth,
                 block = False,
             )
-            tokens.append((ext, cmd, url, url_idx, ext_name, output, token))
+            tokens.append((ext, cmd, url, output, token))
     return tokens
 
-def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
+def _resolve_downloads(mctx, tokens):
     """Wait on tokens in priority order, decompress the first success.
 
     Returns (output_path, url, integrity, ext) on success.
-    Returns None for optional Contents when all attempts fail.
     """
     failed_attempts = []
     result = None
-    for (ext, cmd, url, url_idx, ext_name, output, token) in tokens:
+    for (ext, cmd, url, output, token) in tokens:
         download = token.wait()
         decompress_r = None
         if result != None:
@@ -98,22 +86,12 @@ def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
         if download.success:
             decompress_r = mctx.execute(cmd + [output])
             if decompress_r.return_code == 0:
-                target_triple = "{}/{}/{}".format(dist, comp, arch)
-
-                # Decompressed file lives in its own ext_name subdirectory
-                result = ("{}/{}/{}/{}".format(target_triple, url_idx, ext_name, index_type), url, download.integrity, ext)
+                result = (output.removesuffix(ext) if ext else output, url, download.integrity, ext)
                 continue
-        failed_attempts.append((url + "/.../" + index_type + ext, download, decompress_r))
+        failed_attempts.append((url + "/.../Packages" + ext, download, decompress_r))
     if result != None:
         return result
 
-    if index_type == "Contents":
-        # Contents files are optional; some repositories (e.g. packages.cloud.google.com/apt)
-        # don't provide them. Print a warning and return None instead of failing.
-        print("Warning: Could not fetch Contents index for {}/{}/{}. Contents files are optional.".format(dist, comp, arch))
-        return None
-
-    # For Packages, fail with details
     attempt_messages = []
     for (failed_url, download, decompress) in failed_attempts:
         reason = "unknown"
@@ -129,8 +107,8 @@ def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
 {}
         """.format(len(failed_attempts), "\n".join(attempt_messages)))
 
-def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
-    """Fetch all package indices and contents in parallel, then parse them.
+def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
+    """Fetch all package indices in parallel, then parse them.
 
     Returns the set (as a dict) of fact keys that belong to the current sources,
     so the caller can prune stale facts left behind by previous URLs.
@@ -143,8 +121,8 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
 
         # Deduplicate: multiple dict entries can map to the same logical source
         # (one entry per URL in the urls list). Only process each unique
-        # (dist, component, architecture) combination once.
-        dedup_key = "{}/{}/{}".format(dist, component, architecture)
+        # (URLs, dist, component, architecture) combination once.
+        dedup_key = util.index_fact_key(dist, component, architecture, "Packages", urls)
         if dedup_key in seen:
             continue
         seen[dedup_key] = True
@@ -155,13 +133,12 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
         urls = [url.rstrip("/") for url in urls]
 
         pkg_fact_key = util.index_fact_key(dist, component, architecture, "Packages", urls)
-        cnt_fact_key = util.index_fact_key(dist, component, architecture, "Contents", urls)
         used_keys[pkg_fact_key] = True
-        used_keys[cnt_fact_key] = True
+        if urls and all([util.is_snapshot_uri(url) for url in urls]):
+            snapshot_indices[pkg_fact_key] = True
 
         # Check cached format info to avoid 404 warnings on subsequent runs
         cached_pkg_format = formats.get(pkg_fact_key)
-        cached_cnt_format = formats.get(cnt_fact_key)
 
         # Pass 1: Initiate all downloads with block=False
         # For snapshot suites, integrity hashes from facts enable instant cache hits.
@@ -174,61 +151,22 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
             component,
             architecture,
             glock.facts().get(pkg_fact_key, ""),
-            "Packages",
+            source_id = len(seen),
             cached_format = cached_pkg_format,
         )
 
-        cnt_tokens = None
-        if cached_cnt_format != "unavailable":
-            cnt_tokens = _start_downloads(
-                mctx,
-                urls,
-                dist,
-                component,
-                architecture,
-                glock.facts().get(cnt_fact_key, ""),
-                "Contents",
-                cached_format = cached_cnt_format,
-            )
-
-        pending.append((
-            urls,
-            dist,
-            component,
-            architecture,
-            pkg_tokens,
-            cnt_tokens,
-            pkg_fact_key,
-            cnt_fact_key,
-        ))
+        pending.append((urls, dist, component, architecture, pkg_tokens, pkg_fact_key))
 
     # Pass 2: Wait, decompress, parse
-    for (urls, dist, comp, arch, pkg_tokens, cnt_tokens, pkg_fk, cnt_fk) in pending:
+    for (urls, dist, comp, arch, pkg_tokens, pkg_fk) in pending:
         mctx.report_progress("resolving Package indices: {}/{} for {}".format(dist, comp, arch))
-        (output, url, integrity, ext) = _resolve_downloads(mctx, pkg_tokens, "Packages", dist, comp, arch)
-        if dist in snapshot_suites:
+        (output, url, integrity, ext) = _resolve_downloads(mctx, pkg_tokens)
+        if pkg_fk in snapshot_indices:
             glock.facts()[pkg_fk] = integrity
         formats[pkg_fk] = ext
 
         mctx.report_progress("parsing Package indices: {}/{} for {}".format(dist, comp, arch))
         repo.parse_package_index(mctx.read(output), urls, dist)
-
-        if cnt_tokens != None:
-            mctx.report_progress("resolving Contents: {}/{} for {}".format(dist, comp, arch))
-            contents_result = _resolve_downloads(mctx, cnt_tokens, "Contents", dist, comp, arch)
-        else:
-            contents_result = None
-
-        if contents_result != None:
-            (output, url, integrity, ext) = contents_result
-            if dist in snapshot_suites:
-                glock.facts()[cnt_fk] = integrity
-            formats[cnt_fk] = ext
-
-            mctx.report_progress("parsing Contents: {}/{} for {}".format(dist, comp, arch))
-            repo.parse_contents(mctx.read(output), arch)
-        else:
-            formats[cnt_fk] = "unavailable"
 
     return used_keys
 
@@ -278,15 +216,7 @@ def _distroless_extension(mctx):
             for lock in mod.tags.lock
         ])
 
-    # First pass over sources_list: classify suites as snapshot or rolling
-    snapshot_suites = {}
-    for mod in mctx.modules:
-        for sl in mod.tags.sources_list:
-            uris = [uri.removeprefix("mirror+") for uri in sl.uris]
-            is_snapshot = len(uris) > 0 and all([util.is_snapshot_uri(uri) for uri in uris])
-            if is_snapshot:
-                for suite in sl.suites:
-                    snapshot_suites[suite] = True
+    snapshot_indices = {}
 
     repo = deb_repository.new()
     resolver = dependency_resolver.new(repo)
@@ -317,7 +247,7 @@ def _distroless_extension(mctx):
 
     # Fetch all sources_list in parallel and parse them. `used_keys` is the set
     # of fact keys for the current sources, used below to prune stale facts.
-    used_keys = _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats)
+    used_keys = _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats)
 
     sources = glock.sources()
     dependency_sets = glock.dependency_sets()
@@ -427,7 +357,7 @@ def _distroless_extension(mctx):
             )
 
         # Key every package by the architecture we are resolving for, not by the
-        # package's own `Architecture` field. 
+        # package's own `Architecture` field.
         # For arch-specific packages these are the same.
         # For `Architecture: all` packages this "expands" them into one entry per target architecture,
         # so each carries its own arch-specific dependency closure instead of a single frozen one shared across arches.
@@ -492,7 +422,8 @@ def _distroless_extension(mctx):
         # Storing these in a file instead of passing filemaps as attributes cuts down lockfile size considerably.
         deb_filemap(
             name = util.sanitize(package_key) + "_filemap",
-            files = json.encode(repo.filemap(name = name, arch = arch) or []),
+            urls = package["urls"],
+            sha256 = package["sha256"],
         )
 
         modes = package_repo_modes.get(package_key, {False: True})
@@ -504,15 +435,11 @@ def _distroless_extension(mctx):
             deb_import(
                 name = repo_name,
                 target_name = repo_name,
-                urls = [
-                    uri + "/" + package["filename"]
-                    for uri in sources[package["suite"]]["uris"]
-                ],
+                urls = package["urls"],
                 sha256 = package["sha256"],
                 mergedusr = mergedusr,
                 depends_on = package["depends_on"],
-                # Label of each dependency's own filemap, in depends_on order,
-                # so deb_import can rebuild the {file: dependency} index by lookup.
+                # Dependency filemaps retain resolver order.
                 dep_filemaps = [
                     "@" + util.sanitize(dep) + "_filemap//:filemap.json"
                     for dep in package["depends_on"]
@@ -541,7 +468,7 @@ def _distroless_extension(mctx):
             glock.facts(),
             formats,
             used_keys,
-            snapshot_suites,
+            snapshot_indices,
         )
         return mctx.extension_metadata(
             facts = {"indices": cacheable_indices, "formats": cacheable_formats},

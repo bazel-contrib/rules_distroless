@@ -152,7 +152,6 @@ def _translate_dependency_set_impl(rctx):
     package_template = rctx.read(rctx.attr.package_template)
     lockf = lockfile.from_json(rctx, rctx.attr.lock_content)
 
-    sources = lockf.sources()
     packages = lockf.packages()
     dependency_sets = lockf.dependency_sets()
     dependency_set = dependency_sets[rctx.attr.depset_name]
@@ -209,10 +208,7 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
                     control_targets = '"@%s//:control"' % repo_name,
                     src = '"@%s//:data"' % repo_name,
                     deps = package_deps_for_architecture(packages, package, architecture, mergedusr = rctx.attr.mergedusr),
-                    urls = [
-                        uri + "/" + package["filename"]
-                        for uri in sources[package["suite"]]["uris"]
-                    ],
+                    urls = package["urls"],
                     name = package["name"],
                     arch = package["architecture"],
                     sha256 = package["sha256"],
