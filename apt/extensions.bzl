@@ -23,7 +23,7 @@ def _get_auth(mctx, urls):
         netrc = read_user_netrc(mctx)
     return use_netrc(netrc, urls, {})
 
-def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, cached_format = None):
+def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source_id, cached_format = None):
     """Initiate all format downloads for a given index type with block=False.
 
     If cached_format is set, only that extension is attempted — avoiding
@@ -63,7 +63,7 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, cached
             # Without this, the uncompressed variant ("") and a decompressed
             # .xz/.gz/.bz2 would both write to the same final path.
             ext_name = ext.lstrip(".") if ext else "raw"
-            output = "{}/{}/{}/{}{}".format(target_triple, url_idx, ext_name, index_type, ext)
+            output = "{}/{}/{}/{}/{}{}".format(source_id, target_triple, url_idx, ext_name, index_type, ext)
             if index_type == "Packages":
                 dist_url = "{}/dists/{}/{}/binary-{}/{}{}".format(url, dist, comp, arch, index_type, ext)
             else:
@@ -98,10 +98,7 @@ def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
         if download.success:
             decompress_r = mctx.execute(cmd + [output])
             if decompress_r.return_code == 0:
-                target_triple = "{}/{}/{}".format(dist, comp, arch)
-
-                # Decompressed file lives in its own ext_name subdirectory
-                result = ("{}/{}/{}/{}".format(target_triple, url_idx, ext_name, index_type), url, download.integrity, ext)
+                result = (output.removesuffix(ext) if ext else output, url, download.integrity, ext)
                 continue
         failed_attempts.append((url + "/.../" + index_type + ext, download, decompress_r))
     if result != None:
@@ -129,7 +126,7 @@ def _resolve_downloads(mctx, tokens, index_type, dist, comp, arch):
 {}
         """.format(len(failed_attempts), "\n".join(attempt_messages)))
 
-def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
+def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
     """Fetch all package indices and contents in parallel, then parse them.
 
     Returns the set (as a dict) of fact keys that belong to the current sources,
@@ -143,8 +140,8 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
 
         # Deduplicate: multiple dict entries can map to the same logical source
         # (one entry per URL in the urls list). Only process each unique
-        # (dist, component, architecture) combination once.
-        dedup_key = "{}/{}/{}".format(dist, component, architecture)
+        # (URLs, dist, component, architecture) combination once.
+        dedup_key = util.index_fact_key(dist, component, architecture, "Packages", urls)
         if dedup_key in seen:
             continue
         seen[dedup_key] = True
@@ -158,6 +155,9 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
         cnt_fact_key = util.index_fact_key(dist, component, architecture, "Contents", urls)
         used_keys[pkg_fact_key] = True
         used_keys[cnt_fact_key] = True
+        if urls and all([util.is_snapshot_uri(url) for url in urls]):
+            snapshot_indices[pkg_fact_key] = True
+            snapshot_indices[cnt_fact_key] = True
 
         # Check cached format info to avoid 404 warnings on subsequent runs
         cached_pkg_format = formats.get(pkg_fact_key)
@@ -175,6 +175,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
             architecture,
             glock.facts().get(pkg_fact_key, ""),
             "Packages",
+            source_id = len(seen),
             cached_format = cached_pkg_format,
         )
 
@@ -188,6 +189,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
                 architecture,
                 glock.facts().get(cnt_fact_key, ""),
                 "Contents",
+                source_id = len(seen),
                 cached_format = cached_cnt_format,
             )
 
@@ -206,7 +208,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
     for (urls, dist, comp, arch, pkg_tokens, cnt_tokens, pkg_fk, cnt_fk) in pending:
         mctx.report_progress("resolving Package indices: {}/{} for {}".format(dist, comp, arch))
         (output, url, integrity, ext) = _resolve_downloads(mctx, pkg_tokens, "Packages", dist, comp, arch)
-        if dist in snapshot_suites:
+        if pkg_fk in snapshot_indices:
             glock.facts()[pkg_fk] = integrity
         formats[pkg_fk] = ext
 
@@ -221,7 +223,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats):
 
         if contents_result != None:
             (output, url, integrity, ext) = contents_result
-            if dist in snapshot_suites:
+            if cnt_fk in snapshot_indices:
                 glock.facts()[cnt_fk] = integrity
             formats[cnt_fk] = ext
 
@@ -278,15 +280,7 @@ def _distroless_extension(mctx):
             for lock in mod.tags.lock
         ])
 
-    # First pass over sources_list: classify suites as snapshot or rolling
-    snapshot_suites = {}
-    for mod in mctx.modules:
-        for sl in mod.tags.sources_list:
-            uris = [uri.removeprefix("mirror+") for uri in sl.uris]
-            is_snapshot = len(uris) > 0 and all([util.is_snapshot_uri(uri) for uri in uris])
-            if is_snapshot:
-                for suite in sl.suites:
-                    snapshot_suites[suite] = True
+    snapshot_indices = {}
 
     repo = deb_repository.new()
     resolver = dependency_resolver.new(repo)
@@ -317,7 +311,7 @@ def _distroless_extension(mctx):
 
     # Fetch all sources_list in parallel and parse them. `used_keys` is the set
     # of fact keys for the current sources, used below to prune stale facts.
-    used_keys = _fetch_and_parse_sources(mctx, repo, glock, snapshot_suites, formats)
+    used_keys = _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats)
 
     sources = glock.sources()
     dependency_sets = glock.dependency_sets()
@@ -504,10 +498,7 @@ def _distroless_extension(mctx):
             deb_import(
                 name = repo_name,
                 target_name = repo_name,
-                urls = [
-                    uri + "/" + package["filename"]
-                    for uri in sources[package["suite"]]["uris"]
-                ],
+                urls = package["urls"],
                 sha256 = package["sha256"],
                 mergedusr = mergedusr,
                 depends_on = package["depends_on"],
@@ -541,7 +532,7 @@ def _distroless_extension(mctx):
             glock.facts(),
             formats,
             used_keys,
-            snapshot_suites,
+            snapshot_indices,
         )
         return mctx.extension_metadata(
             facts = {"indices": cacheable_indices, "formats": cacheable_formats},
