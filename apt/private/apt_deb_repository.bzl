@@ -37,17 +37,6 @@ def _parse_repository(state, contents, roots, dist):
             last_key = ""
             pkg = {}
 
-def _parse_contents(state, rcontents, arch):
-    contents = state.filemap.setdefault(arch, {})
-    for line in rcontents.splitlines():
-        last_empty_char = line.rfind(" ")
-        first_empty_char = line.find(" ")
-        filepath = line[:first_empty_char]
-        pkgs = line[last_empty_char + 1:].split(",")
-        for pkg in pkgs:
-            contents.setdefault(pkg[pkg.find("/") + 1:], []).append(filepath)
-    state.filemap[arch] = contents
-
 def _add_package(state, package):
     util.set_dict(
         state.packages,
@@ -111,14 +100,6 @@ def _package(state, name, version, arch, suites = None):
         return None
     return package
 
-def _filemap(state, name, arch):
-    if arch not in state.filemap:
-        return None
-    all = state.filemap[arch]
-    if name not in all:
-        return None
-    return state.filemap[arch][name]
-
 def _add_source_if_not_present(state, source):
     (urls, dist, components, architectures) = source
 
@@ -140,7 +121,6 @@ def _add_source_if_not_present(state, source):
 def _create():
     state = struct(
         sources = dict(),
-        filemap = dict(),
         packages = dict(),
         virtual_packages = dict(),
     )
@@ -149,11 +129,9 @@ def _create():
         add_source = lambda source: _add_source_if_not_present(state, source),
         sources = lambda: state.sources,
         parse_package_index = lambda contents, roots, dist: _parse_repository(state, contents, roots, dist),
-        parse_contents = lambda rcontents, arch: _parse_contents(state, rcontents, arch),
         package_versions = lambda **kwargs: _package_versions(state, **kwargs),
         virtual_packages = lambda **kwargs: _virtual_packages(state, **kwargs),
         package = lambda **kwargs: _package(state, **kwargs),
-        filemap = lambda **kwargs: _filemap(state, **kwargs),
     )
 
 deb_repository = struct(

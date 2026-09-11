@@ -1,7 +1,8 @@
 "deb_import"
 
-load(":lockfile.bzl", "lockfile")
+load(":deb_archive.bzl", "data_archive", "host_bsdtar")
 load(":linker_script.bzl", "linker_script")
+load(":lockfile.bzl", "lockfile")
 load(":pkgconfig.bzl", "pkgconfig")
 load(":util.bzl", "util")
 
@@ -183,7 +184,11 @@ def _remap_linkopts(rctx, extract_dir, so_regular_files, self_files, depends_fil
     return result.linkopts
 
 def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedusr = False):
-    result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
+    archive = data_archive(rctx)
+    tar = host_bsdtar(rctx)
+    result = rctx.execute([tar, "-tvf", archive])
+    if result.return_code:
+        fail("failed to inspect %s: %s" % (archive, result.stderr))
     contents_raw = result.stdout.splitlines()
 
     so_files = []
@@ -283,10 +288,12 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
     files_to_extract = so_regular_files + pc_files
     if files_to_extract:
         rctx.execute(["mkdir", "-p", _EXTRACT_DIR])
-        rctx.execute(
-            ["tar", "-xf", "data.tar.xz", "-C", _EXTRACT_DIR] +
+        result = rctx.execute(
+            [tar, "-xf", archive, "-C", _EXTRACT_DIR] +
             ["./" + f for f in files_to_extract],
         )
+        if result.return_code:
+            fail("failed to extract %s from %s: %s" % (files_to_extract, archive, result.stderr))
 
     remap_linkopts = _remap_linkopts(
         rctx,
@@ -452,17 +459,20 @@ def _deb_import_impl(rctx):
     # Rebuild the {file: canonical_name(dependency_repo)} index from each dependency's own filemap.
     # The first dependency that provides a path wins.
     provided_by = {}
-    for i in range(len(rctx.attr.dep_filemaps)):
-        filemap_path = rctx.path(rctx.attr.dep_filemaps[i])
+    depends_on = []
+    for label in rctx.attr.dep_filemaps:
+        filemap_path = rctx.path(label)
+        filemap = json.decode(rctx.read(filemap_path))
+        depends_on.append(filemap["package_key"])
         dep_repo = filemap_path.dirname.basename.removesuffix("_filemap")
-        for file in json.decode(rctx.read(filemap_path)):
+        for file in filemap["files"]:
             if file not in provided_by:
                 provided_by[file] = dep_repo
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
     cc_import_targets, outs, symlinks = _discover_contents(
         rctx,
-        rctx.attr.depends_on,
+        depends_on,
         provided_by,
         rctx.attr.package_name.removesuffix("-dev"),
         mergedusr = rctx.attr.mergedusr,
@@ -481,8 +491,8 @@ def _deb_import_impl(rctx):
 
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
         mergedusr = rctx.attr.mergedusr,
-        depends_on = ["@" + util.package_repo_name(dep_key, mergedusr = rctx.attr.mergedusr) + "//:data" for dep_key in rctx.attr.depends_on],
-        target_name = rctx.attr.target_name,
+        depends_on = ["@" + util.package_repo_name(dep_key, mergedusr = rctx.attr.mergedusr) + "//:data" for dep_key in depends_on],
+        target_name = util.get_repo_name(rctx.attr.name),
         cc_import_targets = cc_import_targets,
         outs = outs,
         foreign_symlinks = foreign_symlinks,
@@ -494,10 +504,8 @@ deb_import = repository_rule(
     attrs = {
         "urls": attr.string_list(mandatory = True, allow_empty = False),
         "sha256": attr.string(),
-        "depends_on": attr.string_list(doc = "Names of packages this package depends on"),
-        "dep_filemaps": attr.label_list(doc = "Each dependency's filemap.json, in depends_on order, used to resolve cross-package symlinks."),
+        "dep_filemaps": attr.label_list(doc = "Ordered dependency filemaps containing package keys and installed paths."),
         "mergedusr": attr.bool(),
-        "target_name": attr.string(),
         "package_name": attr.string(),
     },
 )

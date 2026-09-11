@@ -61,14 +61,14 @@ def _index_fact_key(dist, component, architecture, index_type, urls):
     url_token = "|".join(sorted_deduplicated_urls)
     return "{}/{}/{}/{}/{}".format(dist, component, architecture, index_type, url_token)
 
-def _prune_uncacheable_facts(indices, formats, used_keys, snapshot_suites):
+def _prune_uncacheable_facts(indices, formats, used_keys, snapshot_indices):
     """Keep only the facts that can be cached.
 
     `used_keys` holds the fact keys produced for this run's sources (see `index_fact_key`).
     Entries left over from a previous snapshot URL are not in `used_keys`,
     so they get dropped here instead of accumulating across runs.
 
-    `snapshot_suites` holds a list of suites from snapshots,
+    `snapshot_indices` holds the fact keys from snapshot sources,
     because we don't want to cache rolling suites.
 
     Returns `(cacheable_indices, cacheable_formats)`.
@@ -76,7 +76,7 @@ def _prune_uncacheable_facts(indices, formats, used_keys, snapshot_suites):
     cacheable_indices = {
         k: v
         for k, v in indices.items()
-        if k in used_keys and k.split("/")[0] in snapshot_suites
+        if k in used_keys and k in snapshot_indices
     }
     cacheable_formats = {
         k: v

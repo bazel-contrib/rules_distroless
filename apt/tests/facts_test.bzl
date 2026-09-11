@@ -45,16 +45,16 @@ def _prune_facts_test(ctx):
 
     old_key = util.index_fact_key("bookworm", "main", "amd64", "Packages", _TEST_SNAPSHOT_1)
     new_key = util.index_fact_key("bookworm", "main", "amd64", "Packages", _TEST_SNAPSHOT_2)
-    rolling_key = util.index_fact_key("sid", "main", "amd64", "Packages", ["https://deb.debian.org/debian"])
+    rolling_key = util.index_fact_key("bookworm", "main", "amd64", "Packages", ["https://deb.debian.org/debian"])
 
     indices = {old_key: "sha256-OLD", new_key: "sha256-NEW", rolling_key: "sha256-ROLLING"}
     formats = {old_key: ".xz", new_key: ".xz", rolling_key: ".xz"}
 
     # Only the current sources' keys are used this run.
     used_keys = {new_key: True, rolling_key: True}
-    snapshot_suites = {"bookworm": True}
+    snapshot_indices = {new_key: True}
 
-    (cacheable_indices, cacheable_formats) = util.prune_uncacheable_facts(indices, formats, used_keys, snapshot_suites)
+    (cacheable_indices, cacheable_formats) = util.prune_uncacheable_facts(indices, formats, used_keys, snapshot_indices)
 
     # The stale previous-URL entry is dropped, and indices from rolling indexes are not cached.
     asserts.equals(env, {new_key: "sha256-NEW"}, cacheable_indices)
