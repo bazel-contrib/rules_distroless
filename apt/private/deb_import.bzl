@@ -1,7 +1,8 @@
 "deb_import"
 
-load(":lockfile.bzl", "lockfile")
+load(":deb_archive.bzl", "data_archive", "host_bsdtar")
 load(":linker_script.bzl", "linker_script")
+load(":lockfile.bzl", "lockfile")
 load(":pkgconfig.bzl", "pkgconfig")
 load(":util.bzl", "util")
 
@@ -183,7 +184,11 @@ def _remap_linkopts(rctx, extract_dir, so_regular_files, self_files, depends_fil
     return result.linkopts
 
 def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedusr = False):
-    result = rctx.execute(["tar", "--exclude='./usr/share/**'", "--exclude='./**/'", "-tvf", "data.tar.xz"])
+    archive = data_archive(rctx)
+    tar = host_bsdtar(rctx)
+    result = rctx.execute([tar, "-tvf", archive])
+    if result.return_code:
+        fail("failed to inspect %s: %s" % (archive, result.stderr))
     contents_raw = result.stdout.splitlines()
 
     so_files = []
@@ -283,10 +288,12 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
     files_to_extract = so_regular_files + pc_files
     if files_to_extract:
         rctx.execute(["mkdir", "-p", _EXTRACT_DIR])
-        rctx.execute(
-            ["tar", "-xf", "data.tar.xz", "-C", _EXTRACT_DIR] +
+        result = rctx.execute(
+            [tar, "-xf", archive, "-C", _EXTRACT_DIR] +
             ["./" + f for f in files_to_extract],
         )
+        if result.return_code:
+            fail("failed to extract %s from %s: %s" % (files_to_extract, archive, result.stderr))
 
     remap_linkopts = _remap_linkopts(
         rctx,

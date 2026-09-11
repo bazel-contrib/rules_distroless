@@ -12,7 +12,7 @@ bazel_dep(name = "rules_cc", version = "0.2.8")
 bazel_dep(name = "rules_java", version = "8.8.0")
 bazel_dep(name = "rules_shell", version = "0.4.1")
 bazel_dep(name = "gawk", version = "5.3.2.bcr.3")
-bazel_dep(name = "tar.bzl", version = "0.6.0")
+bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "yq.bzl", version = "0.3.1")
 
 yq_toolchains = use_extension("@yq.bzl//yq:extensions.bzl", "yq")
@@ -29,7 +29,16 @@ use_repo(bazel_lib_toolchains, "zstd_toolchains")
 use_repo(bazel_lib_toolchains, "coreutils_toolchains")
 
 tar_toolchains = use_extension("@tar.bzl//tar:extensions.bzl", "toolchains")
-use_repo(tar_toolchains, "bsd_tar_toolchains")
+use_repo(
+    tar_toolchains,
+    "bsd_tar_toolchains",
+    "bsd_tar_toolchains_darwin_amd64",
+    "bsd_tar_toolchains_darwin_arm64",
+    "bsd_tar_toolchains_linux_amd64",
+    "bsd_tar_toolchains_linux_arm64",
+    "bsd_tar_toolchains_windows_amd64",
+    "bsd_tar_toolchains_windows_arm64",
+)
 
 # Dev dependencies
 bazel_dep(name = "gazelle", version = "0.34.0", dev_dependency = True, repo_name = "bazel_gazelle")
