@@ -358,6 +358,7 @@ def _distroless_extension(mctx):
                             constraint["version"],
                             "amd64",
                             install.suites,
+                            install.include_transitive,
                             install.mergedusr,
                             False,
                         ))
@@ -373,6 +374,7 @@ def _distroless_extension(mctx):
                         constraint["version"],
                         arch,
                         install.suites,
+                        install.include_transitive,
                         install.mergedusr,
                         False,
                     ))
@@ -383,7 +385,7 @@ def _distroless_extension(mctx):
         if i == ITERATION_MAX:
             fail("apt.install exhausted, please file a bug")
 
-        (dependency_set_name, name, version, arch, suites, mergedusr, is_transitive_dependency) = resolution_queue.pop()
+        (dependency_set_name, name, version, arch, suites, include_transitive, mergedusr, is_transitive_dependency) = resolution_queue.pop()
 
         mctx.report_progress("Resolving %s:%s" % (name, arch))
 
@@ -392,7 +394,7 @@ def _distroless_extension(mctx):
             name = name,
             version = version,
             arch = arch,
-            include_transitive = True,
+            include_transitive = include_transitive,
             suites = suites,
         )
 
@@ -453,6 +455,7 @@ def _distroless_extension(mctx):
                     ("=", dep["Version"]),
                     arch,
                     suites,
+                    include_transitive,
                     mergedusr,
                     True,
                 ))
