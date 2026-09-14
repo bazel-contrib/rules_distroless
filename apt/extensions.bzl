@@ -23,7 +23,179 @@ def _get_auth(mctx, urls):
         netrc = read_user_netrc(mctx)
     return use_netrc(netrc, urls, {})
 
-def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source_id, cached_format = None):
+def _find_pgp_verifier(mctx):
+    """Detect available OpenPGP verifier, preferring sqv over gpgv."""
+    if mctx.which("sqv"):
+        return "sqv"
+    if mctx.which("gpgv"):
+        return "gpgv"
+    return None
+
+def _format_verifier_output(res, verifier):
+    details = []
+    if res.stderr:
+        details.append("stderr:\n" + res.stderr)
+    if res.stdout:
+        details.append("stdout:\n" + res.stdout)
+    out_str = "\n".join(details) if details else "no output"
+    return "{} exit code: {}\n{}".format(verifier, res.return_code, out_str)
+
+def _verifier_cmd(verifier, keyring_args, mode, sig_path, msg_path = None, out_path = None):
+    """Builds execution command arguments for gpgv or sqv."""
+    if verifier == "gpgv":
+        if mode == "clearsigned":
+            return ["gpgv"] + keyring_args + [str(sig_path)]
+        return ["gpgv"] + keyring_args + [str(sig_path), str(msg_path)]
+    elif verifier == "sqv":
+        if mode == "clearsigned":
+            return ["sqv"] + keyring_args + ["--cleartext", "--output", str(out_path), str(sig_path)]
+        return ["sqv"] + keyring_args + ["--signature-file", str(sig_path), str(msg_path)]
+    else:
+        fail("No OpenPGP verifier found (gpgv or sqv).")
+
+def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_verified_path):
+    """Verifies InRelease using gpgv or sqv and returns (success, content_or_error)."""
+
+    # sqv creates its output with create_new(true) and fails with os error 17 if the output file already exists.
+    # Since module_ctx lacks repository_ctx.delete(), we remove any leftover file from earlier runs.
+    mctx.execute(["rm", "-f", str(mctx.path(output_verified_path))])
+
+    cmd = _verifier_cmd(
+        verifier,
+        keyring_args,
+        "clearsigned",
+        mctx.path(in_release_path),
+        out_path = mctx.path(output_verified_path),
+    )
+    res = mctx.execute(cmd)
+    if res.return_code != 0:
+        return (False, _format_verifier_output(res, verifier))
+    if verifier == "gpgv":
+        return (True, util.strip_pgp_clearsign_armor(mctx.read(in_release_path)))
+    return (True, mctx.read(output_verified_path))
+
+def _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, release_path):
+    """Verifies detached Release.gpg signature against Release using gpgv or sqv."""
+    cmd = _verifier_cmd(
+        verifier,
+        keyring_args,
+        "detached",
+        mctx.path(release_gpg_path),
+        msg_path = mctx.path(release_path),
+    )
+    res = mctx.execute(cmd)
+    if res.return_code != 0:
+        return (False, _format_verifier_output(res, verifier))
+    return (True, mctx.read(release_path))
+
+def _prepare_keyring_paths(mctx, verifier, gpg_keys):
+    """Prepares keyring file paths, automatically dearmoring ASCII keys if using gpgv."""
+    paths = []
+    for key_label in gpg_keys:
+        key_path = mctx.path(key_label)
+        if verifier == "gpgv":
+            key_str = str(key_path)
+
+            # Binary keyrings (.gpg, .kbx) require no dearmoring; avoid reading raw binary data
+            if not key_str.endswith(".gpg") and not key_str.endswith(".kbx"):
+                content = mctx.read(key_path)
+                if util.is_ascii_armored(content):
+                    dearmored_rel_path = "dearmored_key_{}.gpg".format(util.sanitize(str(key_label)))
+                    dearmored_path = mctx.path(dearmored_rel_path)
+
+                    gpg_bin = mctx.which("gpg")
+                    sq_bin = mctx.which("sq")
+                    if gpg_bin:
+                        res = mctx.execute([
+                            "gpg",
+                            "--dearmor",
+                            "--batch",
+                            "--yes",
+                            "-o",
+                            str(dearmored_path),
+                            str(key_path),
+                        ])
+                        if res.return_code != 0:
+                            fail("Failed to dearmor ASCII key '{}' with gpg:\n{}\nPlease ensure a modern version of `gpg` (GnuPG 2.x) is installed on PATH.".format(key_label, res.stderr))
+                        paths.append(str(dearmored_path))
+                        continue
+                    elif sq_bin:
+                        res = mctx.execute([
+                            "sq",
+                            "--overwrite",
+                            "packet",
+                            "dearmor",
+                            "--output",
+                            str(dearmored_path),
+                            str(key_path),
+                        ])
+                        if res.return_code != 0:
+                            fail("Failed to dearmor ASCII key '{}' with sq:\n{}\nPlease ensure a modern version of `sq` (Sequoia PGP >= 1.0 supporting `sq packet dearmor`) is installed on PATH.".format(key_label, res.stderr))
+                        paths.append(str(dearmored_path))
+                        continue
+                    else:
+                        fail("Key '{}' is ASCII-armored, but `gpgv` requires binary OpenPGP format. Please install a modern version of `gpg` (GnuPG 2.x) or `sq` (Sequoia PGP >= 1.0) on PATH to auto-dearmor, or provide binary .gpg keyrings.".format(key_label))
+        paths.append(str(key_path))
+    return paths
+
+def _download_and_verify_release(mctx, urls, dist, gpg_keys):
+    """Downloads InRelease (or Release + Release.gpg) and verifies with gpgv/sqv."""
+    verifier = _find_pgp_verifier(mctx)
+    if not verifier:
+        fail("GPG verification requested for dist '{}', but neither `gpgv` nor `sqv` was found on PATH. Please install a modern version of `gpgv` (GnuPG 2.x) or `sqv` (Sequoia PGP >= 1.0).".format(dist))
+
+    keyring_paths = _prepare_keyring_paths(mctx, verifier, gpg_keys)
+    keyring_args = util.build_keyring_args(keyring_paths)
+    errors = []
+
+    for (url_idx, url) in enumerate(urls):
+        in_release_url = "{}/dists/{}/InRelease".format(url, dist)
+        in_release_path = "inrelease/{}/{}/InRelease".format(dist, url_idx)
+        verified_path = "inrelease/{}/{}/Release.verified".format(dist, url_idx)
+
+        mctx.report_progress("Downloading InRelease from {}".format(in_release_url))
+        download = mctx.download(
+            url = in_release_url,
+            output = in_release_path,
+            allow_fail = True,
+        )
+        if download.success:
+            mctx.report_progress("Verifying InRelease signature using {}".format(verifier))
+            ok, res = _verify_inrelease(mctx, verifier, keyring_args, in_release_path, verified_path)
+            if ok:
+                return res
+            fail("GPG verification failed for InRelease from {}:\n{}".format(in_release_url, res))
+        else:
+            errors.append("Failed to download InRelease from {}".format(in_release_url))
+
+        # Fallback to Release + Release.gpg
+        release_url = "{}/dists/{}/Release".format(url, dist)
+        release_gpg_url = "{}/dists/{}/Release.gpg".format(url, dist)
+        release_path = "inrelease/{}/{}/Release".format(dist, url_idx)
+        release_gpg_path = "inrelease/{}/{}/Release.gpg".format(dist, url_idx)
+
+        mctx.report_progress("Downloading Release from {}".format(release_url))
+        dl_rel = mctx.download(url = release_url, output = release_path, allow_fail = True)
+        if dl_rel.success:
+            mctx.report_progress("Downloading Release.gpg from {}".format(release_gpg_url))
+            dl_gpg = mctx.download(url = release_gpg_url, output = release_gpg_path, allow_fail = True)
+            if dl_gpg.success:
+                mctx.report_progress("Verifying Release signature using {}".format(verifier))
+                ok, res = _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, release_path)
+                if ok:
+                    return res
+                fail("GPG verification failed for Release from {}:\n{}".format(release_url, res))
+            else:
+                errors.append("Failed to download Release.gpg from {}".format(release_gpg_url))
+        else:
+            errors.append("Failed to download Release from {}".format(release_url))
+
+    fail("Failed to fetch or verify repository Release/InRelease for dist '{}':\n{}".format(
+        dist,
+        "\n".join(errors),
+    ))
+
+def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source_id, cached_format = None, hashes = None):
     """Initiate all format downloads for a given index type with block=False.
 
     If cached_format is set, only that extension is attempted — avoiding
@@ -51,11 +223,29 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source
             ("", ["true"]),
         ]
 
+    # Filter extensions if we have verified hashes from Release file
+    if hashes != None:
+        available_extensions = []
+        for (ext, cmd) in extensions:
+            if index_type == "Packages":
+                path = "{}/binary-{}/{}{}".format(comp, arch, index_type, ext)
+            else:
+                path = "{}/Contents-{}{}".format(comp, arch, ext)
+            if path in hashes:
+                available_extensions.append((ext, cmd))
+        extensions = available_extensions
+        if not extensions:
+            if index_type == "Packages":
+                fail("No Packages index found in Release file for suite '{}', component '{}', arch '{}'".format(dist, comp, arch))
+            else:
+                return []
+
     if cached_format != None:
         extensions = [(ext, cmd) for (ext, cmd) in extensions if ext == cached_format]
 
     base_auth = _get_auth(mctx, urls)
     tokens = []
+
     for (url_idx, url) in enumerate(urls):
         for (ext, cmd) in extensions:
             # Each (url, ext) gets a unique output directory to prevent
@@ -65,16 +255,32 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source
             ext_name = ext.lstrip(".") if ext else "raw"
             output = "{}/{}/{}/{}/{}{}".format(source_id, target_triple, url_idx, ext_name, index_type, ext)
             if index_type == "Packages":
-                dist_url = "{}/dists/{}/{}/binary-{}/{}{}".format(url, dist, comp, arch, index_type, ext)
+                path = "{}/binary-{}/{}{}".format(comp, arch, index_type, ext)
+                dist_url = "{}/dists/{}/{}".format(url, dist, path)
             else:
-                dist_url = "{}/dists/{}/{}/Contents-{}{}".format(url, dist, comp, arch, ext)
+                path = "{}/Contents-{}{}".format(comp, arch, ext)
+                dist_url = "{}/dists/{}/{}".format(url, dist, path)
+
             auth = {}
             if url in base_auth:
                 auth = {dist_url: base_auth[url]}
+
+            sha256 = ""
+            if hashes != None:
+                if path not in hashes:
+                    fail("Missing SHA256 checksum in Release file for '{}' (suite '{}', component '{}', arch '{}')".format(
+                        path,
+                        dist,
+                        comp,
+                        arch,
+                    ))
+                sha256 = hashes[path]
+
             token = mctx.download(
                 url = dist_url,
                 output = output,
-                integrity = integrity,
+                integrity = integrity if hashes == None else "",
+                sha256 = sha256,
                 allow_fail = True,
                 auth = auth,
                 block = False,
@@ -135,8 +341,19 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
     pending = []
     seen = {}
     used_keys = {}
+    verified_releases = {}
+
+    def get_release_hashes(dist, urls, gpg_keys):
+        cache_key = (dist, tuple(urls), tuple([str(k) for k in gpg_keys]))
+        if cache_key in verified_releases:
+            return verified_releases[cache_key]
+        release_content = _download_and_verify_release(mctx, urls, dist, gpg_keys)
+        hashes = util.parse_release_file(release_content)
+        verified_releases[cache_key] = hashes
+        return hashes
+
     for source_key, source in repo.sources().items():
-        (urls, dist, component, architecture) = source
+        (urls, dist, component, architecture, gpg_keys) = source
 
         # Deduplicate: multiple dict entries can map to the same logical source
         # (one entry per URL in the urls list). Only process each unique
@@ -163,6 +380,10 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
         cached_pkg_format = formats.get(pkg_fact_key)
         cached_cnt_format = formats.get(cnt_fact_key)
 
+        hashes = None
+        if gpg_keys:
+            hashes = get_release_hashes(dist, urls, gpg_keys)
+
         # Pass 1: Initiate all downloads with block=False
         # For snapshot suites, integrity hashes from facts enable instant cache hits.
         # Cached formats narrow downloads to only the known-good extension.
@@ -177,6 +398,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
             "Packages",
             source_id = len(seen),
             cached_format = cached_pkg_format,
+            hashes = hashes,
         )
 
         cnt_tokens = None
@@ -191,6 +413,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
                 "Contents",
                 source_id = len(seen),
                 cached_format = cached_cnt_format,
+                hashes = hashes,
             )
 
         pending.append((
@@ -206,6 +429,8 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
 
     # Pass 2: Wait, decompress, parse
     for (urls, dist, comp, arch, pkg_tokens, cnt_tokens, pkg_fk, cnt_fk) in pending:
+        if not pkg_tokens:
+            continue
         mctx.report_progress("resolving Package indices: {}/{} for {}".format(dist, comp, arch))
         (output, url, integrity, ext) = _resolve_downloads(mctx, pkg_tokens, "Packages", dist, comp, arch)
         if pkg_fk in snapshot_indices:
@@ -215,7 +440,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
         mctx.report_progress("parsing Package indices: {}/{} for {}".format(dist, comp, arch))
         repo.parse_package_index(mctx.read(output), urls, dist)
 
-        if cnt_tokens != None:
+        if cnt_tokens:
             mctx.report_progress("resolving Contents: {}/{} for {}".format(dist, comp, arch))
             contents_result = _resolve_downloads(mctx, cnt_tokens, "Contents", dist, comp, arch)
         else:
@@ -292,6 +517,22 @@ def _distroless_extension(mctx):
         for sl in mod.tags.sources_list:
             uris = [uri.removeprefix("mirror+") for uri in sl.uris]
             architectures = sl.architectures
+            gpg_keys = list(sl.gpg_keys)
+
+            if gpg_keys and sl.allow_unsigned:
+                fail(
+                    "\n\nRepository source for suite(s) {} from {} specified both GPG keyring(s) and `allow_unsigned = True`.\n\n".format(sl.suites, sl.uris) +
+                    "These options are mutually exclusive. Either remove `allow_unsigned = True` to enable signature verification, or remove `gpg_keys` to allow unsigned repositories.\n",
+                )
+
+            if not gpg_keys and not sl.allow_unsigned:
+                fail(
+                    "\n\nRepository source for suite(s) {} from {} has no GPG/OpenPGP keyring specified (`gpg_keys`).\n\n".format(sl.suites, sl.uris) +
+                    "Cryptographic OpenPGP signature verification is required by default to guarantee repository integrity.\n" +
+                    "To resolve this, either:\n" +
+                    "  1 - Provide the repository GPG keyring(s) via `gpg_keys = [\"//keys:debian.gpg\"]` (or `.asc`).\n" +
+                    "  2 - Explicitly allow unsigned repositories by setting `allow_unsigned = True` in `apt.sources_list`.\n",
+                )
 
             for suite in sl.suites:
                 glock.add_source(
@@ -303,7 +544,7 @@ def _distroless_extension(mctx):
                 )
 
                 repo.add_source(
-                    (uris, suite, sl.components, architectures),
+                    (uris, suite, sl.components, architectures, tuple(gpg_keys)),
                 )
 
     # Seed cached formats from facts (which extensions each remote serves)
@@ -623,18 +864,79 @@ examples showing how to do this for Debian and Ubuntu:
 
 For more infomation, please check https://snapshot.debian.org and/or
 https://snapshot.ubuntu.com.
+
+### GPG / OpenPGP Signature Verification
+
+`rules_distroless` supports verifying the cryptographic OpenPGP signatures on repository
+indices (`InRelease` or `Release` + `Release.gpg`) before downloading package indexes.
+
+You can specify keyring files using `gpg_keys`:
+
+```starlark
+apt.sources_list(
+    architectures = ["amd64", "arm64"],
+    components = ["main"],
+    gpg_keys = ["//keys:debian-archive-keyring.gpg"],
+    suites = ["bookworm"],
+    types = ["deb"],
+    uris = ["https://deb.debian.org/debian"],
+)
+```
+
+The extension auto-detects `gpgv` or `sqv` (Sequoia PGP) on `PATH`:
+- Verifies `InRelease` clearsigned files (or `Release.gpg` detached signatures).
+- Extracts the verified `SHA256:` checksum table for index files (`Packages.xz`, `Contents-*.gz`).
+- Passes SHA256 hashes to Bazel download actions to guarantee end-to-end repository integrity.
+
+> **Keyring Formats**: Both binary OpenPGP keyrings (`.gpg` / `.kbx`) and ASCII-armored
+> keyrings (`.asc`) are supported. When using `gpgv`, ASCII-armored keyrings are
+> automatically converted to binary format using `gpg --dearmor` if needed.
+
+> **Valid-Until & Expiration Notice**: `Valid-Until` timestamps in `Release` files are
+> intentionally not enforced. Bazel's execution model is hermetic (no host clock in Starlark),
+> snapshot archives have expired dates by definition, and wall-clock enforcement would cause
+> reproducible builds to spontaneously fail ("time bombs") when evaluated in the future.
+>
+> **Security Implication**: Snapshot repositories (`snapshot.debian.org`, `snapshot.ubuntu.com`)
+> are immutably tied to a point-in-time snapshot, mitigating rollback and freeze attacks.
+> However, for rolling suites (such as `deb.debian.org/debian bookworm`), an active network
+> attacker or compromised mirror could theoretically serve a stale-but-validly-signed `Release`
+> file without being detected by `rules_distroless`. Users requiring protection against freeze
+> attacks should use snapshot archive URLs.
+
+If you are using an unsigned internal repository or do not wish to verify signatures,
+you must explicitly opt in with `allow_unsigned = True`:
+
+```starlark
+apt.sources_list(
+    allow_unsigned = True,
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["custom"],
+    types = ["deb"],
+    uris = ["https://internal.repo.corp.example.com"],
+)
+```
 """
 
 sources_list = tag_class(
     attrs = {
+        "allow_unsigned": attr.bool(
+            default = False,
+            doc = "Allow unverified/unsigned repository indices without GPG keys.",
+        ),
+        "architectures": attr.string_list(),
+        "components": attr.string_list(),
+        "gpg_keys": attr.label_list(
+            allow_files = True,
+            doc = "Optional list of GPG/OpenPGP keyring files (.gpg or .asc) for repository signature verification.",
+        ),
         "sources": attr.string_list(
             # mandatory = True,
         ),
+        "suites": attr.string_list(),
         "types": attr.string_list(),
         "uris": attr.string_list(),
-        "suites": attr.string_list(),
-        "components": attr.string_list(),
-        "architectures": attr.string_list(),
     },
 )
 

@@ -53,7 +53,7 @@ http_archive(
 apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
 
 # Debian Bullseye sources (for debian_snapshot example)
-# Using September 2024 snapshot
+# Using September 2024 snapshot with OpenPGP signature verification
 apt.sources_list(
     architectures = [
         "amd64",
@@ -63,6 +63,7 @@ apt.sources_list(
         "main",
         "contrib",
     ],
+    gpg_keys = ["//keys:debian-test-keys.asc"],
     suites = [
         "bullseye",
         "bullseye-updates",
@@ -76,6 +77,7 @@ apt.sources_list(
         "arm64",
     ],
     components = ["main"],
+    gpg_keys = ["//keys:debian-test-keys.asc"],
     suites = ["bullseye-security"],
     types = ["deb"],
     uris = ["https://snapshot.debian.org/archive/debian-security/20240901T024950Z"],

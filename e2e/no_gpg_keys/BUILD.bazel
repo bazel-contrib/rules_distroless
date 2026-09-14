@@ -1,0 +1,4 @@
+alias(
+    name = "no_gpg_keys",
+    actual = "@bullseye//tzdata:data",
+)

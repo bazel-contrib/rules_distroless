@@ -1,0 +1,4 @@
+alias(
+    name = "invalid_key",
+    actual = "@bullseye//tzdata:data",
+)

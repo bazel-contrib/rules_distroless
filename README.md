@@ -52,6 +52,30 @@ git_override(
 )
 ```
 
+## GPG / OpenPGP Signature Verification
+
+`rules_distroless` verifies cryptographic OpenPGP signatures on repository indices
+(`InRelease` or `Release` + `Release.gpg`) using `gpgv` or `sqv` on `PATH`:
+
+```starlark
+apt.sources_list(
+    architectures = ["amd64", "arm64"],
+    components = ["main"],
+    gpg_keys = ["//keys:debian-archive-keyring.gpg"],
+    suites = ["bookworm"],
+    types = ["deb"],
+    uris = ["https://deb.debian.org/debian"],
+)
+```
+
+> [!NOTE]
+> **Keyring Requirements (`gpgv` vs. `sqv`)**: Distribution index files (`InRelease`)
+> are often cross-signed by multiple keys (e.g., current release key, successor key, and transition keys).
+> - `gpgv` strictly requires that **all** keys that signed the file are present in the keyring; it exits with code 2 if any co-signing key is missing.
+> - `sqv` requires at least one valid signature from the keyring.
+>
+> To ensure reproducible builds across machines regardless of which verifier is installed on `PATH`, keyrings should include all co-signing keys present on the target release files (or the full distribution archive keyring).
+
 # Examples
 
 The [examples](/examples) demonstrate how to accomplish typical tasks such as

@@ -22,6 +22,7 @@ apt.sources_list(
         "main",
         "contrib",
     ],
+    gpg_keys = ["//keys:debian-test-keys.asc"],
     suites = ["bullseye"],
     types = ["deb"],
     uris = [
@@ -35,6 +36,7 @@ apt.sources_list(
         "arm64",
     ],
     components = ["main"],
+    gpg_keys = ["//keys:debian-test-keys.asc"],
     suites = ["bullseye-security"],
     types = ["deb"],
     uris = ["https://snapshot-cloudflare.debian.org/archive/debian-security/20240210T223313Z"],
@@ -45,11 +47,13 @@ apt.sources_list(
         "arm64",
     ],
     components = ["main"],
+    gpg_keys = ["//keys:debian-test-keys.asc"],
     suites = ["bullseye-updates"],
     types = ["deb"],
     uris = ["https://snapshot-cloudflare.debian.org/archive/debian/20240210T223313Z"],
 )
 apt.sources_list(
+    allow_unsigned = True,
     architectures = [
         "amd64",
         "arm64",

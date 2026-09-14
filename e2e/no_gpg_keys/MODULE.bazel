@@ -1,0 +1,30 @@
+bazel_dep(name = "rules_distroless", version = "0.0.0", dev_dependency = True)
+local_path_override(
+    module_name = "rules_distroless",
+    path = "../..",
+)
+
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+apt.sources_list(
+    architectures = [
+        "amd64",
+    ],
+    components = [
+        "main",
+    ],
+    suites = ["bullseye"],
+    types = ["deb"],
+    uris = [
+        "https://snapshot.debian.org/archive/debian/20240901T024950Z",
+    ],
+)
+apt.install(
+    dependency_set = "bullseye",
+    packages = [
+        "tzdata",
+    ],
+    suites = [
+        "bullseye",
+    ],
+)
+use_repo(apt, "bullseye")

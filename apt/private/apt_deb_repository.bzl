@@ -120,7 +120,7 @@ def _filemap(state, name, arch):
     return state.filemap[arch][name]
 
 def _add_source_if_not_present(state, source):
-    (urls, dist, components, architectures) = source
+    (urls, dist, components, architectures, gpg_keys) = source
 
     for arch in architectures:
         for comp in components:
@@ -128,14 +128,24 @@ def _add_source_if_not_present(state, source):
                 "%".join((url, dist, comp, arch))
                 for url in urls
             ]
-            found = any([
-                key in state.sources
-                for key in keys
-            ])
+            found = False
+            for key in keys:
+                if key in state.sources:
+                    found = True
+                    (_, _, _, _, old_keys) = state.sources[key]
+                    if sorted([str(k) for k in old_keys]) != sorted([str(k) for k in gpg_keys]):
+                        fail("Conflicting GPG configuration for source '{url}' suite '{dist}' component '{comp}' arch '{arch}': previously registered with gpg_keys = {old}; conflicting definition has gpg_keys = {new}.".format(
+                            url = key.split("%")[0],
+                            dist = dist,
+                            comp = comp,
+                            arch = arch,
+                            old = old_keys,
+                            new = gpg_keys,
+                        ))
             if found:
                 continue
             for key in keys:
-                state.sources[key] = (urls, dist, comp, arch)
+                state.sources[key] = (urls, dist, comp, arch, gpg_keys)
 
 def _create():
     state = struct(

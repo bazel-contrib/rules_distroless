@@ -85,6 +85,81 @@ def _prune_uncacheable_facts(indices, formats, used_keys, snapshot_indices):
     }
     return (cacheable_indices, cacheable_formats)
 
+def _strip_pgp_clearsign_armor(content):
+    """Strips PGP cleartext signature framing from InRelease content."""
+    if "-----BEGIN PGP SIGNED MESSAGE-----" not in content:
+        return content
+
+    lines = content.splitlines()
+    output_lines = []
+    in_message = False
+    in_header = False
+    for line in lines:
+        if line.startswith("-----BEGIN PGP SIGNED MESSAGE-----"):
+            in_header = True
+            continue
+        if in_header:
+            if line.strip() == "":
+                in_header = False
+                in_message = True
+            continue
+        if line.startswith("-----BEGIN PGP SIGNATURE-----"):
+            in_message = False
+            break
+        if in_message:
+            if line.startswith("- "):
+                line = line[2:]
+            output_lines.append(line)
+    if not output_lines:
+        fail("Malformed PGP clearsigned message: failed to extract signed content.")
+    return "\n".join(output_lines)
+
+def _split_whitespace(s):
+    """Splits a string by contiguous whitespace (spaces, tabs, newlines)."""
+    parts = []
+    current = ""
+    for i in range(len(s)):
+        c = s[i]
+        if c == " " or c == "\t" or c == "\n" or c == "\r":
+            if current:
+                parts.append(current)
+                current = ""
+        else:
+            current += c
+    if current:
+        parts.append(current)
+    return parts
+
+def _parse_release_file(content):
+    """Parses SHA256 hashes for index files from Release/InRelease contents."""
+    hashes = {}
+    lines = content.splitlines()
+    in_sha256_section = False
+    for line in lines:
+        is_continuation = line.startswith(" ") or line.startswith("\t")
+        if line.startswith("SHA256:"):
+            in_sha256_section = True
+            continue
+        elif line.startswith("SHA512:") or line.startswith("SHA1:") or line.startswith("MD5Sum:") or (line and not is_continuation):
+            in_sha256_section = False
+        if in_sha256_section and is_continuation:
+            parts = _split_whitespace(line)
+            if len(parts) == 3:
+                sha256, _size, path = parts
+                hashes[path] = sha256
+    return hashes
+
+def _build_keyring_args(key_paths):
+    """Build repeated --keyring arguments for a list of keyring paths."""
+    args = []
+    for k in key_paths:
+        args.extend(["--keyring", str(k)])
+    return args
+
+def _is_ascii_armored(content):
+    """Returns True if the content is an ASCII-armored OpenPGP block."""
+    return "-----BEGIN PGP" in content
+
 def _warning(rctx, message):
     rctx.execute([
         "echo",
@@ -101,4 +176,8 @@ util = struct(
     is_snapshot_uri = _is_snapshot_uri,
     index_fact_key = _index_fact_key,
     prune_uncacheable_facts = _prune_uncacheable_facts,
+    strip_pgp_clearsign_armor = _strip_pgp_clearsign_armor,
+    parse_release_file = _parse_release_file,
+    build_keyring_args = _build_keyring_args,
+    is_ascii_armored = _is_ascii_armored,
 )
