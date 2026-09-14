@@ -1,7 +1,7 @@
 "unit tests for dependency set translation"
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//apt/private:translate_dependency_set.bzl", "package_deps_for_architecture")
+load("//apt/private:translate_dependency_set.bzl", "package_deps_for_architecture", "resolve_package_template")
 load("//apt/private:util.bzl", "util")
 
 _TEST_SUITE_PREFIX = "translate_dependency_set/"
@@ -61,6 +61,68 @@ def _package_repo_name_modes_test(ctx):
 
 package_repo_name_modes_test = unittest.make(_package_repo_name_modes_test)
 
+def _resolve_package_template_test(ctx):
+    env = unittest.begin(ctx)
+
+    default_template = "default: {name}"
+    custom_nvidia_template = "nvidia: {name}"
+    custom_dev_template = "dev: {name}"
+
+    templates = [
+        {
+            "packages": ["nvidia-*"],
+            "template": custom_nvidia_template,
+            "additional_variables": {"cuda_version": "12.0"},
+        },
+        {
+            "packages": ["*-dev", "libc6"],
+            "template": custom_dev_template,
+            "additional_variables": {"is_dev": "true"},
+        },
+    ]
+
+    # Matching nvidia-* prefix
+    (tmpl, vars) = resolve_package_template("nvidia-driver", templates, default_template)
+    asserts.equals(env, custom_nvidia_template, tmpl)
+    asserts.equals(env, {"cuda_version": "12.0"}, vars)
+
+    # Matching *-dev suffix
+    (tmpl, vars) = resolve_package_template("libssl-dev", templates, default_template)
+    asserts.equals(env, custom_dev_template, tmpl)
+    asserts.equals(env, {"is_dev": "true"}, vars)
+
+    # Matching exact "libc6"
+    (tmpl, vars) = resolve_package_template("libc6", templates, default_template)
+    asserts.equals(env, custom_dev_template, tmpl)
+    asserts.equals(env, {"is_dev": "true"}, vars)
+
+    # Fallback to default template when unmatched
+    (tmpl, vars) = resolve_package_template("bash", templates, default_template)
+    asserts.equals(env, default_template, tmpl)
+    asserts.equals(env, {}, vars)
+
+    # First match takes precedence
+    overlapping_templates = [
+        {
+            "packages": ["lib*"],
+            "template": "lib_template",
+            "additional_variables": {"tier": "1"},
+        },
+        {
+            "packages": ["libc6"],
+            "template": "libc6_template",
+            "additional_variables": {"tier": "2"},
+        },
+    ]
+    (tmpl, vars) = resolve_package_template("libc6", overlapping_templates, default_template)
+    asserts.equals(env, "lib_template", tmpl)
+    asserts.equals(env, {"tier": "1"}, vars)
+
+    return unittest.end(env)
+
+resolve_package_template_test = unittest.make(_resolve_package_template_test)
+
 def translate_dependency_set_tests():
     no_mixed_architectures_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures")
     package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")
+    resolve_package_template_test(name = _TEST_SUITE_PREFIX + "resolve_package_template")

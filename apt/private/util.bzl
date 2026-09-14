@@ -91,6 +91,29 @@ def _warning(rctx, message):
         "\033[0;33mWARNING:\033[0m {}".format(message),
     ], quiet = False)
 
+def _glob_match(pattern, text):
+    """Matches text against a glob pattern with '*' wildcards."""
+    if pattern == "*":
+        return True
+    if "*" not in pattern:
+        return pattern == text
+
+    parts = pattern.split("*")
+    if not text.startswith(parts[0]):
+        return False
+    text = text[len(parts[0]):]
+
+    for i in range(1, len(parts) - 1):
+        sub = parts[i]
+        if not sub:
+            continue
+        idx = text.find(sub)
+        if idx == -1:
+            return False
+        text = text[idx + len(sub):]
+
+    return text.endswith(parts[-1])
+
 util = struct(
     sanitize = _sanitize,
     package_repo_name = _package_repo_name,
@@ -101,4 +124,5 @@ util = struct(
     is_snapshot_uri = _is_snapshot_uri,
     index_fact_key = _index_fact_key,
     prune_uncacheable_facts = _prune_uncacheable_facts,
+    glob_match = _glob_match,
 )

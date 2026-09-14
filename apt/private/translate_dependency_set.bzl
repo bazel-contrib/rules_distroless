@@ -148,8 +148,17 @@ def package_deps_for_architecture(packages, package, architecture, mergedusr = F
         if packages[dep_key]["architecture"] in [architecture, "all"]
     ]
 
+def resolve_package_template(package_name, package_templates, default_template):
+    """Resolves the package template and additional variables for a package name."""
+    for entry in package_templates:
+        for pattern in entry.get("packages", []):
+            if util.glob_match(pattern, package_name):
+                return (entry["template"], entry.get("additional_variables", {}))
+    return (default_template, {})
+
 def _translate_dependency_set_impl(rctx):
-    package_template = rctx.read(rctx.attr.package_template)
+    default_package_template = rctx.read(rctx.attr.package_template)
+    package_templates = json.decode(rctx.attr.package_templates) if rctx.attr.package_templates else []
     lockf = lockfile.from_json(rctx, rctx.attr.lock_content)
 
     packages = lockf.packages()
@@ -200,20 +209,29 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
                 ),
             ).architectures[architecture] = package_key
 
+            (tmpl, additional_variables) = resolve_package_template(
+                package_name,
+                package_templates,
+                default_package_template,
+            )
+
+            format_vars = {
+                "target_name": architecture,
+                "data_targets": '"@%s//:data"' % repo_name,
+                "control_targets": '"@%s//:control"' % repo_name,
+                "src": '"@%s//:data"' % repo_name,
+                "deps": package_deps_for_architecture(packages, package, architecture, mergedusr = rctx.attr.mergedusr),
+                "urls": package["urls"],
+                "name": package["name"],
+                "arch": package["architecture"],
+                "sha256": package["sha256"],
+                "repo_name": repo_name,
+            }
+            format_vars.update(additional_variables)
+
             rctx.file(
                 "%s/%s/BUILD.bazel" % (package["name"], architecture),
-                package_template.format(
-                    target_name = architecture,
-                    data_targets = '"@%s//:data"' % repo_name,
-                    control_targets = '"@%s//:control"' % repo_name,
-                    src = '"@%s//:data"' % repo_name,
-                    deps = package_deps_for_architecture(packages, package, architecture, mergedusr = rctx.attr.mergedusr),
-                    urls = package["urls"],
-                    name = package["name"],
-                    arch = package["architecture"],
-                    sha256 = package["sha256"],
-                    repo_name = repo_name,
-                ),
+                tmpl.format(**format_vars),
             )
 
     for (_, info) in packages_to_architectures.items():
@@ -270,5 +288,6 @@ translate_dependency_set = repository_rule(
         "lock_content": attr.string(doc = "INTERNAL: DO NOT USE"),
         "mergedusr": attr.bool(default = False, doc = "INTERNAL: Whether package layers were normalized with merged-/usr semantics."),
         "package_template": attr.label(default = "//apt/private:package.BUILD.tmpl"),
+        "package_templates": attr.string(default = "[]", doc = "INTERNAL: JSON-encoded list of package template configurations"),
     },
 )
