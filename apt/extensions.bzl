@@ -319,6 +319,7 @@ def _distroless_extension(mctx):
     resolution_queue = []
     already_resolved = {}
     dependency_set_mergedusr = {}
+    dependency_set_package_template = {}
     package_repo_roots = {
         False: {},
         True: {},
@@ -329,6 +330,8 @@ def _distroless_extension(mctx):
             if install.dependency_set:
                 current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
                 dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
+                if install.dependency_set not in dependency_set_package_template and install.package_template != None:
+                    dependency_set_package_template[install.dependency_set] = install.package_template
 
             for dep_constraint in install.packages:
                 constraint = version_constraint.parse_dep(dep_constraint)
@@ -471,11 +474,15 @@ def _distroless_extension(mctx):
     package_repo_modes = compute_package_repo_modes(glock.packages(), package_repo_roots)
     for depset_name in dependency_sets.keys():
         depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
+        kwargs = {}
+        if depset_name in dependency_set_package_template:
+            kwargs["package_template"] = dependency_set_package_template[depset_name]
         translate_dependency_set(
             name = depset_name,
             depset_name = depset_name,
             lock_content = lock_content,
             mergedusr = depset_mergedusr,
+            **kwargs
         )
 
     # Generate a repo per package which will be aliased by hub repo.
@@ -648,6 +655,9 @@ install = tag_class(
         "suites": attr.string_list(),
         "include_transitive": attr.bool(default = True),
         "mergedusr": attr.bool(default = False),
+        "package_template": attr.label(
+            allow_single_file = True,
+        ),
     },
 )
 
