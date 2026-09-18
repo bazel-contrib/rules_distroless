@@ -7,7 +7,7 @@ load("//apt/private:deb_filemap.bzl", "deb_filemap")
 load("//apt/private:deb_import.bzl", "deb_import")
 load("//apt/private:lockfile.bzl", "lockfile")
 load("//apt/private:pgp.bzl", "pgp")
-load("//apt/private:translate_dependency_set.bzl", "translate_dependency_set")
+load("//apt/private:translate_dependency_set.bzl", "check_template_variable_collision", "translate_dependency_set")
 load("//apt/private:util.bzl", "util")
 load("//apt/private:version_constraint.bzl", "version_constraint")
 
@@ -316,6 +316,22 @@ def compute_package_repo_modes(packages, roots_by_mode):
 
     return modes
 
+def filter_package_templates(package_templates, depset_name):
+    """Filters package templates applicable to a specific dependency set.
+
+    Args:
+        package_templates: list of package template dictionaries.
+        depset_name: name of the dependency set.
+
+    Returns:
+        A list of package template dictionaries applicable to depset_name.
+    """
+    return [
+        pt
+        for pt in package_templates
+        if not pt.get("dependency_sets") or depset_name in pt["dependency_sets"]
+    ]
+
 def _distroless_extension(mctx):
     # Detect facts API availability
     use_facts = hasattr(mctx, "facts")
@@ -536,16 +552,50 @@ def _distroless_extension(mctx):
             arch_set = dependency_set["sets"].setdefault(arch, {})
             arch_set[pkg_short_key] = package["Version"]
 
+    package_templates = []
+    for mod in mctx.modules:
+        for pt in mod.tags.package_template:
+            if not mod.is_root:
+                fail("apt.package_template can only be declared by the root module, but was declared in module '{}'.".format(mod.name))
+            if pt.template and pt.template_file:
+                fail("apt.package_template: exactly one of 'template' or 'template_file' must be specified, not both.")
+            if not pt.template and not pt.template_file:
+                fail("apt.package_template: either 'template' or 'template_file' must be specified.")
+
+            if not pt.packages:
+                fail("apt.package_template: 'packages' attribute must not be empty.")
+
+            collision = check_template_variable_collision(pt.additional_variables)
+            if collision:
+                fail("apt.package_template: additional variable '{}' conflicts with built-in template variable.".format(collision))
+
+            for ds in pt.dependency_sets:
+                if ds not in dependency_sets:
+                    fail("apt.package_template: unknown dependency_set '{}'. Available dependency sets: {}".format(
+                        ds,
+                        sorted(dependency_sets.keys()),
+                    ))
+
+            tmpl = pt.template if pt.template else mctx.read(pt.template_file)
+            package_templates.append({
+                "dependency_sets": pt.dependency_sets,
+                "packages": pt.packages,
+                "template": tmpl,
+                "additional_variables": dict(pt.additional_variables),
+            })
+
     # Generate a hub repo for every dependency set
     lock_content = glock.as_json()
     package_repo_modes = compute_package_repo_modes(glock.packages(), package_repo_roots)
     for depset_name in dependency_sets.keys():
         depset_mergedusr = dependency_set_mergedusr.get(depset_name, False)
+        depset_templates = filter_package_templates(package_templates, depset_name)
         translate_dependency_set(
             name = depset_name,
             depset_name = depset_name,
             lock_content = lock_content,
             mergedusr = depset_mergedusr,
+            package_templates = json.encode(depset_templates),
         )
 
     # Generate a repo per package which will be aliased by hub repo.
@@ -790,6 +840,64 @@ lock = tag_class(
     },
 )
 
+package_template = tag_class(
+    doc = """Configures a custom BUILD file template for packages matching specific name patterns.
+
+This tag can only be declared by the root module. Templates are evaluated in declaration order;
+the first matching template applies. Place specific package patterns before broader wildcards.
+
+Target Contract:
+The template is rendered into each architecture subpackage (`//<package>/<arch>/BUILD.bazel`).
+Custom templates must define the following public targets so the package root's multi-platform aliases and hub repo targets function correctly:
+  * `:data` (alias or target pointing to `{data_targets}`, with `visibility = ["//visibility:public"]`)
+  * `:control` (alias or target pointing to `{control_targets}`, with `visibility = ["//visibility:public"]`)
+  * `:{target_name}` (target representing the package for this architecture, with `visibility = ["//visibility:public"]`, referenced by the root package target `//<package>` and hub repo `:packages` target). While the default template uses a `filegroup(srcs = {deps} + [":data"])`, custom templates may use other rules or omit transitive `{deps}` (e.g. for `include_transitive = False`).
+
+Template Syntax & Rules:
+  * Root module references: Because templates render inside external hub repos (`@<depset_name>`), rules or files loaded from the root workspace must use the canonical repository prefix `@@//` (e.g. `load("@@//:custom_rule.bzl", "my_rule")`).
+  * Brace escaping: Because Python-style `str.format()` is used, literal braces in templates (such as `{}` in comments or Starlark dictionaries) must be escaped by doubling them as `{{` and `}}`.
+  * Quoting conventions: Built-in label variables (`{data_targets}`, `{control_targets}`, `{src}`) already include double quotes (e.g. `actual = {data_targets}`). String metadata (`{name}`, `{version}`, `{suite}`, `{arch}`, `{target_name}`, `{sha256}`, `{repo_name}`) and `additional_variables` do not (e.g. `package_name = "{name}"`). List variables (`{deps}`, `{urls}`) format as Starlark lists (e.g. `srcs = {deps} + [":data"]`).
+
+Built-in variables available for formatting:
+  * `{target_name}`: Target architecture name (e.g. 'amd64').
+  * `{name}`: Package name (raw string).
+  * `{version}`: Package version (raw string).
+  * `{suite}`: Distribution suite (e.g. 'bookworm') (raw string).
+  * `{arch}`: Package architecture (raw string).
+  * `{deps}`: List of direct dependencies formatted as labels.
+  * `{data_targets}`: Label pointing to the package data archive (quoted).
+  * `{control_targets}`: Label pointing to the package control archive (quoted).
+  * `{src}`: Label pointing to the package data archive (quoted, alias for `{data_targets}`).
+  * `{repo_name}`: Generated repository name for the package (raw string).
+  * `{urls}`: List of package download URLs.
+  * `{sha256}`: SHA256 checksum of the package archive (raw string).
+
+For reference on the standard structure, see the default template at
+`//apt/private:package.BUILD.tmpl` (https://github.com/bazel-contrib/rules_distroless/blob/main/apt/private/package.BUILD.tmpl).
+""",
+    attrs = {
+        "dependency_sets": attr.string_list(
+            doc = "List of dependency set names this template applies to. If empty, applies to all dependency sets.",
+            default = [],
+        ),
+        "packages": attr.string_list(
+            doc = "List of package names or glob patterns (e.g. ['nvidia-*', 'libc6', '*']) this template applies to.",
+            default = ["*"],
+        ),
+        "template": attr.string(
+            doc = "Inline template string for the package BUILD file. Must define ':data', ':control', and ':{target_name}' targets. Literal braces '{' and '}' must be escaped as '{{' and '}}'.",
+        ),
+        "template_file": attr.label(
+            doc = "Template file for the package BUILD file. Must define ':data', ':control', and ':{target_name}' targets. Literal braces '{' and '}' must be escaped as '{{' and '}}'.",
+            allow_single_file = True,
+        ),
+        "additional_variables": attr.string_dict(
+            doc = "Additional variables to pass into template formatting. Must not conflict with built-in template variables (e.g. 'name', 'version', 'suite', 'arch', 'deps', 'src', 'repo_name', 'target_name', 'data_targets', 'control_targets', 'urls', 'sha256').",
+            default = {},
+        ),
+    },
+)
+
 apt = module_extension(
     doc = _doc,
     implementation = _distroless_extension,
@@ -797,5 +905,6 @@ apt = module_extension(
         "install": install,
         "sources_list": sources_list,
         "lock": lock,
+        "package_template": package_template,
     },
 )

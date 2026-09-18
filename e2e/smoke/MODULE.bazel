@@ -87,5 +87,13 @@ apt.install(
         "cloud-sdk",
     ],
 )
+apt.package_template(
+    additional_variables = {
+        "custom_annotation": "smoke_test_custom_variable",
+    },
+    dependency_sets = ["bullseye"],
+    packages = ["tzdata"],
+    template_file = "//:custom_package.BUILD.tmpl",
+)
 apt.lock(into = ":bullseye.lock.json")
 use_repo(apt, "bullseye")

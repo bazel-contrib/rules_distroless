@@ -5,6 +5,11 @@ load("@rules_distroless//distroless:defs.bzl", "cacerts", "group", "passwd")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@tar.bzl", "tar")
 
+exports_files([
+    "custom_package.BUILD.tmpl",
+    "custom_package_rule.bzl",
+])
+
 COMPATIBLE_WITH = select({
     "@platforms//cpu:x86_64": ["@platforms//cpu:x86_64"],
     "@platforms//cpu:arm64": ["@platforms//cpu:arm64"],
@@ -141,4 +146,12 @@ container_structure_test(
         "requires-docker",
     ],
     target_compatible_with = COMPATIBLE_WITH,
+)
+
+build_test(
+    name = "custom_package_template_test",
+    target_compatible_with = COMPATIBLE_WITH,
+    targets = [
+        "@bullseye//tzdata",
+    ],
 )
