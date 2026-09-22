@@ -67,6 +67,7 @@ def _add_package(state, package):
             # If multiple versions of a package expose the same virtual package,
             # we should only keep a single reference for the one with greater
             # version.
+            seen = False
             for (i, (provider, provided_version)) in enumerate(providers):
                 if package["Package"] == provider["Package"] and (
                     virtual["version"] == provided_version
@@ -77,9 +78,12 @@ def _add_package(state, package):
                         ">>",
                     ):
                         providers[i] = (package, virtual["version"])
+                    seen = True
+                    break
 
-                    # Return since we found the same package + version.
-                    return
+            # Already a provider of this virtual package; the rest of `Provides` still needs handling.
+            if seen:
+                continue
 
             # Otherwise, first time encountering package.
             providers.append((package, virtual["version"]))

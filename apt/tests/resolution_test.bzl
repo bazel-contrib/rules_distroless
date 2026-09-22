@@ -487,6 +487,39 @@ def _resolve_virtual_package_suite_constraint_test(ctx):
 
 resolve_virtual_package_suite_constraint_test = unittest.make(_resolve_virtual_package_suite_constraint_test)
 
+def _resolve_multiple_virtual_packages_test(ctx):
+    env = unittest.begin(ctx)
+
+    _provides = "httpd, httpd-cgi, nginx-abi-1.22.1-7"
+    _older = "1.22.1-9+deb12u9"
+    _newer = "1.22.1-9+deb12u10"
+
+    def check_all_virtuals_resolve_to(idx, version):
+        for virtual in ["httpd", "httpd-cgi", "nginx-abi-1.22.1-7"]:
+            (package, _) = idx.resolution.resolve_package(
+                name = virtual,
+                version = None,
+                arch = _test_arch,
+            )
+            asserts.equals(env, "nginx", package["Package"])
+            asserts.equals(env, version, package["Version"], "provider of '{}'".format(virtual))
+
+    # Every virtual name is upgraded, not just the first one in `Provides`.
+    idx = _make_index()
+    idx.add_package(package = "nginx", version = _older, provides = _provides)
+    idx.add_package(package = "nginx", version = _newer, provides = _provides)
+    check_all_virtuals_resolve_to(idx, _newer)
+
+    # Indexing the older version afterwards must not downgrade any of them.
+    idx = _make_index()
+    idx.add_package(package = "nginx", version = _newer, provides = _provides)
+    idx.add_package(package = "nginx", version = _older, provides = _provides)
+    check_all_virtuals_resolve_to(idx, _newer)
+
+    return unittest.end(env)
+
+resolve_multiple_virtual_packages_test = unittest.make(_resolve_multiple_virtual_packages_test)
+
 _TEST_SUITE_PREFIX = "package_resolution/"
 
 def resolution_tests():
@@ -537,3 +570,4 @@ def resolution_tests():
     resolve_suite_constraint_transitive_test(name = _TEST_SUITE_PREFIX + "resolve_suite_constraint_transitive")
     resolve_suite_constraint_multiple_suites_test(name = _TEST_SUITE_PREFIX + "resolve_suite_constraint_multiple_suites")
     resolve_virtual_package_suite_constraint_test(name = _TEST_SUITE_PREFIX + "resolve_virtual_package_suite_constraint")
+    resolve_multiple_virtual_packages_test(name = _TEST_SUITE_PREFIX + "resolve_multiple_virtual_packages")
