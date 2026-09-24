@@ -61,7 +61,7 @@ if [[ "$deduplicate" == "True" ]]; then
             fflush()
         }
     }' "$mtree")
-    rm "$mtree"
+    $coreutils rm "$mtree"
 else
     # No deduplication, business as usual
     $bsdtar "$@"

@@ -52,6 +52,30 @@ git_override(
 )
 ```
 
+## GPG / OpenPGP Signature Verification
+
+`rules_distroless` verifies cryptographic OpenPGP signatures on repository indices
+(`InRelease` or `Release` + `Release.gpg`) using `gpgv` or `sqv` on `PATH`:
+
+```starlark
+apt.sources_list(
+    architectures = ["amd64", "arm64"],
+    components = ["main"],
+    gpg_keys = ["//keys:debian-archive-keyring.gpg"],
+    suites = ["bookworm"],
+    types = ["deb"],
+    uris = ["https://deb.debian.org/debian"],
+)
+```
+
+> [!NOTE]
+> **Keyring Requirements (`gpgv` vs. `sqv`)**: Distribution index files (`InRelease`)
+> are often cross-signed by multiple keys (e.g., current release key, successor key, and transition keys).
+> - `gpgv` strictly requires that **all** keys that signed the file are present in the keyring; it exits with code 2 if any co-signing key is missing.
+> - `sqv` requires at least one valid signature from the keyring.
+>
+> To ensure reproducible builds across machines regardless of which verifier is installed on `PATH`, keyrings should include all co-signing keys present on the target release files (or the full distribution archive keyring).
+
 # Examples
 
 The [examples](/examples) demonstrate how to accomplish typical tasks such as
@@ -78,15 +102,13 @@ We also have `distroless`-specific rules that could be useful:
 To read more specific documentation for each of the rules in the repo please
 check the following docs:
 
-- [apt](https://registry.bazel.build/docs/rules_distroless#apt-defs-bzl): repository rule for installing Debian/Ubuntu packages.
-- [apt macro](https://registry.bazel.build/docs/rules_distroless#apt-apt-bzl): legacy macro for installing Debian/Ubuntu
-  packages.
-- [rules](https://registry.bazel.build/docs/rules_distroless#distroless-defs-bzl): various helper rules to aid with creating a Linux /
+- [apt](https://registry.bazel.build/modules/rules_distroless/latest/docs/apt/defs.bzl): repository rule for installing Debian/Ubuntu packages.
+- [rules](https://registry.bazel.build/modules/rules_distroless/latest/docs/distroless/defs.bzl): various helper rules to aid with creating a Linux /
   Debian installation from scratch.
 
 # Adopters
 
-- [Google's `distroless` container images](https://github.com/GoogleContainerTools/distroless)
+- [Google's `distroless` container images]
 - [Arize AI](https://www.arize.com)
 
 > [!TIP]
@@ -101,5 +123,5 @@ check the following docs:
 [Bzlmod migration guide]: https://bazel.build/external/migration
 [`rules_distroless` Github releases page]: https://github.com/bazel-contrib/rules_distroless/releases
 [Update on the future stability of source code archives and hashes]: https://github.blog/2023-02-21-update-on-the-future-stability-of-source-code-archives-and-hashes
-[Google's `distroless` container images]: https://github.com/bazel-contrib/distroless
+[Google's `distroless` container images]: https://github.com/GoogleContainerTools/distroless
 [Arize AI]: https://www.arize.com

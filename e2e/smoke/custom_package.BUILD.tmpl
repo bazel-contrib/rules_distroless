@@ -1,0 +1,26 @@
+"""Custom package template for smoke test. DO NOT EDIT."""
+
+# Escaped literal braces test: {{escaped_literal_braces}}
+load("@@//:custom_package_rule.bzl", "custom_package")
+
+alias(
+    name = "data",
+    actual = {data_targets},
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "control",
+    actual = {control_targets},
+    visibility = ["//visibility:public"],
+)
+
+custom_package(
+    name = "{target_name}",
+    data = ":data",
+    package_name = "{name}",
+    package_version = "{version}",
+    suite = "{suite}",
+    extra_annotation = "{custom_annotation}",
+    visibility = ["//visibility:public"],
+)

@@ -47,21 +47,34 @@ def assert_tar_listing(name, actual, expected):
         expected: expected listing
     """
     actual_listing = "_{}_listing".format(name)
+    expected_listing_raw = "_{}_expected_raw".format(name)
     expected_listing = "_{}_expected".format(name)
 
+    # The order in which bsdtar lists tar members reflects the underlying
+    # filesystem's directory-entry order, which is not guaranteed to be
+    # stable across platforms/filesystems (e.g. ext4 htree hashing). Sort
+    # both the actual and expected listings so this assertion only checks
+    # for presence, absence and duplication of paths, not their order.
     native.genrule(
         name = actual_listing,
         srcs = [actual],
         outs = ["_{}.listing".format(name)],
-        cmd = "cat $(execpath {}) | $(BSDTAR_BIN) -tf - > $@".format(actual),
+        cmd = "cat $(execpath {}) | $(BSDTAR_BIN) -tf - | sort > $@".format(actual),
         toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"],
     )
 
     write_file(
-        name = expected_listing,
-        out = "_{}.expected".format(name),
+        name = expected_listing_raw,
+        out = "_{}.expected_raw".format(name),
         content = [expected],
         newline = "unix",
+    )
+
+    native.genrule(
+        name = expected_listing,
+        srcs = [":" + expected_listing_raw],
+        outs = ["_{}.expected".format(name)],
+        cmd = "sort $< > $@",
     )
 
     diff_test(

@@ -16,15 +16,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-macos:
-    runs-on: macos-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Bazel versions used in BCR presubmit
+        bazel-version: [7.x, 8.x]
+        os: [ubuntu-latest, macos-latest]
+        workspace:
+          - dir: "."
+            name: root
+          - dir: examples
+            name: examples
+          - dir: e2e/smoke
+            name: e2e-smoke
+          - dir: e2e/invalid_key
+            name: e2e-invalid-key
+            expect_failure_log: "GPG verification failed"
+          - dir: e2e/no_gpg_keys
+            name: e2e-no-gpg-keys
+            expect_failure_log: "signature verification is required by default"
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: bazel-contrib/setup-bazel@0.15.0
-      - run: bazel test //...
-  test-linux:
+      - uses: actions/checkout@v7.0.1
+      - uses: bazel-contrib/setup-bazel@0.19.0
+      - if: ${{ !matrix.workspace.expect_failure_log }}
+        run: USE_BAZEL_VERSION=${{ matrix.bazel-version }} bazel test //...
+        working-directory: ${{ matrix.workspace.dir }}
+      - if: ${{ matrix.workspace.expect_failure_log }}
+        run: |
+          if USE_BAZEL_VERSION=${{ matrix.bazel-version }} bazel build //... > stderr.log 2>&1; then
+            echo "Expected build to fail, but it succeeded!"
+            exit 1
+          fi
+          cat stderr.log
+          grep -q "${{ matrix.workspace.expect_failure_log }}" stderr.log
+        working-directory: ${{ matrix.workspace.dir }}
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: test-logs-${{ matrix.bazel-version }}-${{ matrix.os }}-${{ matrix.workspace.name }}
+          path: ${{ matrix.workspace.dir }}/bazel-testlogs/**/test.log
+          if-no-files-found: ignore
+          retention-days: 5
+
+  # Single job to use as a required status check, since the matrix job names
+  # above vary and can't be pinned individually in branch protection rules.
+  ci:
+    if: ${{ !cancelled() }}
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bazel-contrib/setup-bazel@0.15.0
-      - run: bazel test //...
+      - name: Check matrix job results
+        run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "One or more matrix jobs failed: ${{ needs.test.result }}"
+            exit 1
+          fi

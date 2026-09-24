@@ -1,6 +1,6 @@
 # buildifier: disable=bzl-visibility
-load("//apt:defs.bzl", "dpkg_statusd")
-load("//distroless/tests:asserts.bzl", "assert_tar_mtree")
+load("@rules_distroless//apt:defs.bzl", "dpkg_statusd")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_tar_mtree")
 
 dpkg_statusd(
     name = "statusd",

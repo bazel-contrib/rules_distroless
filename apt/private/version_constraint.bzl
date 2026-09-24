@@ -3,10 +3,16 @@
 load(":version.bzl", version_lib = "version")
 
 def _parse_version_constraint(rawv):
-    vconst_i = rawv.find(" ")
-    if vconst_i == -1:
-        fail('invalid version string %s expected a version constraint ">=", "=", ">=", "<<", ">>"' % rawv)
-    return (rawv[:vconst_i], rawv[vconst_i + 1:])
+    rawv = rawv.strip()
+    for op in ["<<", ">>", "<=", ">=", "="]:
+        if rawv.startswith(op):
+            version = rawv[len(op):].strip()
+            if version:
+                return (op, version)
+
+            break
+
+    fail('invalid version string %s expected a version constraint ">=", "=", "<=", "<<", ">>"' % rawv)
 
 def _parse_dep(raw):
     raw = raw.strip()  # remove leading & trailing whitespace
@@ -70,11 +76,12 @@ def _version_relop(va, vb, op):
         return version_lib.eq(va, vb)
     fail("unknown op %s" % op)
 
-def _is_satisfied_by(va, vb):
-    if vb[0] != "=":
+def _is_satisfied_by(v_requested, v_provided):
+    if v_provided[0] != "=":
         fail("Per https://www.debian.org/doc/debian-policy/ch-relationships.html only = is allowed for Provides field.")
 
-    return _version_relop(vb[1], va[1], va[0])
+    v_requested_op = v_requested[0]
+    return _version_relop(v_provided[1], v_requested[1], v_requested_op)
 
 version_constraint = struct(
     relop = _version_relop,

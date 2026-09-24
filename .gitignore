@@ -2,6 +2,10 @@
 # see https://github.com/bazelbuild/bazel/issues/20369
 MODULE.bazel.lock
 e2e/smoke/MODULE.bazel.lock
+e2e/invalid_key/MODULE.bazel.lock
+e2e/no_gpg_keys/MODULE.bazel.lock
+e2e/invalid_key/stderr.log
+e2e/no_gpg_keys/stderr.log
 bazel-*
 .bazelrc.user
 .idea/

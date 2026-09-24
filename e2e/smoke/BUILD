@@ -1,18 +1,14 @@
-"""
-NOTE:
-
-        This is the main test used in the e2e testing.
-
-  PLEASE KEEP e2e/smoke/BUILD and examples/debian_snapshot/BUILD
-  IN-SYNC WITH EACH OTHER, AS WELL AS THE REST OF THE TEST FILES
-    (test_linux_<ARCH> files and the bullseye YAML manifest)
-"""
-
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@container_structure_test//:defs.bzl", "container_structure_test")
 load("@rules_distroless//distroless:defs.bzl", "cacerts", "group", "passwd")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@tar.bzl", "tar")
+
+exports_files([
+    "custom_package.BUILD.tmpl",
+    "custom_package_rule.bzl",
+])
 
 COMPATIBLE_WITH = select({
     "@platforms//cpu:x86_64": ["@platforms//cpu:x86_64"],
@@ -131,12 +127,31 @@ oci_load(
     target_compatible_with = COMPATIBLE_WITH,
 )
 
+build_test(
+    name = "smoke_build_test",
+    targets = [
+        ":image_platform",
+        ":tarball",
+    ],
+)
+
 container_structure_test(
-    name = "test",
+    name = "structure_test",
     configs = select({
         "@platforms//cpu:arm64": ["test_linux_arm64.yaml"],
         "@platforms//cpu:x86_64": ["test_linux_amd64.yaml"],
     }),
     image = ":image_platform",
+    tags = [
+        "requires-docker",
+    ],
     target_compatible_with = COMPATIBLE_WITH,
+)
+
+build_test(
+    name = "custom_package_template_test",
+    target_compatible_with = COMPATIBLE_WITH,
+    targets = [
+        "@bullseye//tzdata",
+    ],
 )

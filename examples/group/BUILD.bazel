@@ -1,6 +1,6 @@
-load("@bazel_lib//lib:diff_test.bzl", "diff_test")
-load("//distroless:defs.bzl", "group")
-load("//distroless/tests:asserts.bzl", "assert_tar_mtree")
+load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@rules_distroless//distroless:defs.bzl", "group")
+load("@rules_distroless//distroless/tests:asserts.bzl", "assert_tar_mtree")
 
 group(
     name = "group",

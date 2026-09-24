@@ -97,7 +97,7 @@ cacerts = rule(
         ),
         "mode": attr.string(
             doc = "mode for the entries",
-            default = "0555",
+            default = "0644",
         ),
         "time": attr.string(
             doc = "time for the entries",
