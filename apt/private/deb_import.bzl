@@ -165,6 +165,8 @@ def _remap_linkopts(rctx, extract_dir, so_regular_files, self_files, depends_fil
     grep = rctx.execute(
         ["grep", "-I", "-l", "-e", "OUTPUT_FORMAT", "-e", "GROUP", "-e", "INPUT"] + scratch_paths,
     )
+    if grep.return_code > 1:
+        fail("failed to scan linker scripts for %s: %s" % (target_name, grep.stderr))
 
     referenced = []
     for script_path in grep.stdout.splitlines():
@@ -495,6 +497,10 @@ def _deb_import_impl(rctx):
         foreign_symlinks = foreign_symlinks,
         symlink_outs = symlinks.keys(),
     ))
+
+    # Bazel < 8.3.0 has no repo_metadata.
+    if hasattr(rctx, "repo_metadata"):
+        return rctx.repo_metadata(reproducible = True)
 
 deb_import = repository_rule(
     implementation = _deb_import_impl,
