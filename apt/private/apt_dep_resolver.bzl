@@ -83,12 +83,27 @@ def _resolve_package(state, name, version, arch, suites = None):
 
     return (package, warning)
 
+def _is_installed(installed, dep, arch):
+    """Whether a package already installed satisfies `dep`, as apt would see it."""
+    providers = installed.virtual_packages(name = dep["name"], arch = arch) + installed.virtual_packages(name = dep["name"], arch = "all")
+    for (_, provided_version) in providers:
+        if not dep["version"] or (provided_version and version_constraint.is_satisfied_by(dep["version"], provided_version)):
+            return True
+    versions = installed.package_versions(name = dep["name"], arch = arch) + installed.package_versions(name = dep["name"], arch = "all")
+    for v in versions:
+        if not dep["version"] or version_constraint.relop(v, dep["version"][1], dep["version"][0]):
+            return True
+    return False
+
 _ITERATION_MAX_ = 2147483646
 
 # For future: unfortunately this function uses a few state variables to track
 # certain conditions and package dependency groups.
 # TODO: Try to simplify it in the future.
-def _resolve_all(state, name, version, arch, include_transitive = True, suites = None):
+# `installed`, when set, is a repository of the packages already installed
+# (a base image's): a dependency, or one alternative of a dependency group,
+# that one of them satisfies is met and not resolved further.
+def _resolve_all(state, name, version, arch, include_transitive = True, suites = None, installed = None):
     unmet_dependencies = []
     root_package = None
     dependencies = []
@@ -162,6 +177,8 @@ def _resolve_all(state, name, version, arch, include_transitive = True, suites =
             deps.extend(version_constraint.parse_depends(package["Depends"]))
 
         for dep in deps:
+            if installed and any([_is_installed(installed, d, arch) for d in (dep if type(dep) == "list" else [dep])]):
+                continue
             if type(dep) == "list":
                 # create a dependency group
                 new_dependency_group_idx = len(dependency_group)
