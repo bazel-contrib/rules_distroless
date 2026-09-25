@@ -16,11 +16,12 @@ def _dpkg_status_impl(ctx):
     args.add(output)
     args.add(ctx.executable._gawk.path)
     args.add(coreutils.coreutils_info.bin)
+    args.add(ctx.file.base.path if ctx.file.base else "")
     args.add_all(ctx.files.controls)
 
     ctx.actions.run(
         executable = ctx.executable._dpkg_status_sh,
-        inputs = ctx.files.controls,
+        inputs = ctx.files.controls + ctx.files.base,
         outputs = [output],
         tools = [
             bsdtar.default.files,
@@ -46,6 +47,10 @@ dpkg_status = rule(
         "controls": attr.label_list(
             allow_files = [".tar.zst", ".tar.xz", ".tar.gz", ".tar"],
             mandatory = True,
+        ),
+        "base": attr.label(
+            doc = "A dpkg status file the packages' entries are added to, such as the base image's.",
+            allow_single_file = True,
         ),
         "_gawk": attr.label(
             allow_single_file = True,

@@ -520,6 +520,66 @@ def _resolve_multiple_virtual_packages_test(ctx):
 
 resolve_multiple_virtual_packages_test = unittest.make(_resolve_multiple_virtual_packages_test)
 
+def _resolve_installed_test(ctx):
+    env = unittest.begin(ctx)
+
+    def resolve(installed):
+        idx = _make_index()
+        idx.add_package(package = "libc6", version = "2.36-9")
+        idx.add_package(package = "mawk")
+        idx.add_package(package = "gawk")
+        idx.add_package(package = "libbar")
+        idx.add_package(package = "libbaz")
+        idx.add_package(package = "libqux", depends = "libc6 (>= 2.34)")
+        idx.add_package(
+            package = "foo",
+            depends = "libc6 (>= 2.34), mawk | awk, libbar | libbaz, libqux",
+        )
+
+        base = _make_index()
+        for package in installed:
+            base.add_package(**package)
+
+        (root_package, dependencies, unmet, _) = idx.resolution.resolve_all(
+            name = "foo",
+            version = ("=", _test_version),
+            arch = _test_arch,
+            installed = base.idx,
+        )
+        asserts.equals(env, "foo", root_package["Package"])
+        asserts.equals(env, [], unmet)
+        return sorted([dep["Package"] for dep in dependencies])
+
+    # Nothing installed: the whole closure, as without a base.
+    asserts.equals(env, ["libbar", "libc6", "libqux", "mawk"], resolve([]))
+
+    # A dependency the base satisfies is not resolved, not even for the
+    # packages that are (libqux's libc6).
+    asserts.equals(env, ["libbar", "libqux", "mawk"], resolve([
+        {"package": "libc6", "version": "2.35-0ubuntu3"},
+    ]))
+
+    # Unless it is too old for the constraint.
+    asserts.equals(env, ["libbar", "libc6", "libqux", "mawk"], resolve([
+        {"package": "libc6", "version": "2.31-13"},
+    ]))
+
+    # Any alternative met by the base meets the group, the first or not; so
+    # does a package that provides the virtual one named.
+    asserts.equals(env, ["libc6", "libqux"], resolve([
+        {"package": "gawk", "provides": "awk"},
+        {"package": "libbaz"},
+    ]))
+
+    # An `Architecture: all` package installed meets a dependency on it.
+    asserts.equals(env, ["libbar", "libc6", "libqux"], resolve([
+        {"package": "mawk", "architecture": "all"},
+    ]))
+
+    return unittest.end(env)
+
+resolve_installed_test = unittest.make(_resolve_installed_test)
+
 _TEST_SUITE_PREFIX = "package_resolution/"
 
 def resolution_tests():
@@ -571,3 +631,4 @@ def resolution_tests():
     resolve_suite_constraint_multiple_suites_test(name = _TEST_SUITE_PREFIX + "resolve_suite_constraint_multiple_suites")
     resolve_virtual_package_suite_constraint_test(name = _TEST_SUITE_PREFIX + "resolve_virtual_package_suite_constraint")
     resolve_multiple_virtual_packages_test(name = _TEST_SUITE_PREFIX + "resolve_multiple_virtual_packages")
+    resolve_installed_test(name = _TEST_SUITE_PREFIX + "resolve_installed")

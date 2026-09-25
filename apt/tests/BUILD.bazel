@@ -5,6 +5,7 @@ load(":extensions_test.bzl", "extensions_tests")
 load(":facts_test.bzl", "facts_tests")
 load(":linker_script_test.bzl", "linker_script_tests")
 load(":lockfile_test.bzl", "lockfile_tests")
+load(":oci_base_test.bzl", "oci_base_tests")
 load(":release_test.bzl", "release_tests")
 load(":resolution_test.bzl", "resolution_tests")
 load(":translate_dependency_set_test.bzl", "translate_dependency_set_tests")
@@ -26,6 +27,8 @@ facts_tests()
 linker_script_tests()
 
 lockfile_tests()
+
+oci_base_tests()
 
 release_tests()
 

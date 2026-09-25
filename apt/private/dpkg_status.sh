@@ -5,9 +5,14 @@ readonly bsdtar="$1"
 readonly out="$2"
 readonly awk="$3"
 readonly coreutils="$4"
-shift 4
+readonly base="$5"
+shift 5
 
 tmp_out=$($coreutils mktemp)
+
+if [[ -n "$base" ]]; then
+    $coreutils cat "$base" >> $tmp_out
+fi
 
 while  (( $# > 0 )); do
     $bsdtar -xf "$1" --to-stdout ./control |
