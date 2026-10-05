@@ -487,6 +487,33 @@ def _resolve_virtual_package_suite_constraint_test(ctx):
 
 resolve_virtual_package_suite_constraint_test = unittest.make(_resolve_virtual_package_suite_constraint_test)
 
+def _resolve_same_virtual_provider_across_suites_test(ctx):
+    env = unittest.begin(ctx)
+
+    # The same provider package in two suites (e.g. debian bookworm and ubuntu noble) must stay
+    # resolvable in both, regardless of which suite has the newer version or is indexed first.
+    for order in [("bookworm", "noble"), ("noble", "bookworm")]:
+        idx = _make_index()
+        versions = {"bookworm": "1.3.4.20200120-3.1", "noble": "1.3.4.20240123-1build1"}
+        for dist in order:
+            idx.add_package(package = "mawk", version = versions[dist], provides = "awk", dist = dist)
+
+        for dist in order:
+            (package, _) = idx.resolution.resolve_package(
+                name = "awk",
+                version = None,
+                arch = _test_arch,
+                suites = [dist],
+            )
+            asserts.true(env, package != None, "no awk provider in {} when indexed in order {}".format(dist, order))
+            if package:
+                asserts.equals(env, dist, package["Dist"])
+                asserts.equals(env, versions[dist], package["Version"])
+
+    return unittest.end(env)
+
+resolve_same_virtual_provider_across_suites_test = unittest.make(_resolve_same_virtual_provider_across_suites_test)
+
 def _resolve_multiple_virtual_packages_test(ctx):
     env = unittest.begin(ctx)
 
@@ -570,4 +597,5 @@ def resolution_tests():
     resolve_suite_constraint_transitive_test(name = _TEST_SUITE_PREFIX + "resolve_suite_constraint_transitive")
     resolve_suite_constraint_multiple_suites_test(name = _TEST_SUITE_PREFIX + "resolve_suite_constraint_multiple_suites")
     resolve_virtual_package_suite_constraint_test(name = _TEST_SUITE_PREFIX + "resolve_virtual_package_suite_constraint")
+    resolve_same_virtual_provider_across_suites_test(name = _TEST_SUITE_PREFIX + "resolve_same_virtual_provider_across_suites")
     resolve_multiple_virtual_packages_test(name = _TEST_SUITE_PREFIX + "resolve_multiple_virtual_packages")
