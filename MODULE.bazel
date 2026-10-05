@@ -15,6 +15,9 @@ bazel_dep(name = "ape", version = "1.1.0")
 bazel_dep(name = "tar.bzl", version = "0.10.4")
 bazel_dep(name = "yq.bzl", version = "0.3.1")
 
+ape_cosmos = use_extension("@ape//ape/cosmos:defs.bzl", "ape_cosmos")
+use_repo(ape_cosmos, "bzip2", "gzip", "xz", "true")
+
 yq_toolchains = use_extension("@yq.bzl//yq:extensions.bzl", "yq")
 use_repo(yq_toolchains, "yq_darwin_amd64")
 use_repo(yq_toolchains, "yq_darwin_arm64")
