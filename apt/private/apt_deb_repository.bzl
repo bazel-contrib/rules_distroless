@@ -69,7 +69,7 @@ def _add_package(state, package):
             # version.
             seen = False
             for (i, (provider, provided_version)) in enumerate(providers):
-                if package["Package"] == provider["Package"] and (
+                if package["Package"] == provider["Package"] and package["Dist"] == provider["Dist"] and (
                     virtual["version"] == provided_version
                 ):
                     if version_constraint.relop(
