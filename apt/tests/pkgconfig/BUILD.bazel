@@ -1,0 +1,96 @@
+load(":fixtures.bzl", "fixture_repo")
+load(":pkgconfig_test.bzl", "originals", "pkgconfig_test")
+
+exports_files(["legacy.BUILD.tmpl"])
+
+# Only the metadata dependencies transition. Tests and tar run on the host,
+# so both selections also run on macOS and on a single-architecture runner.
+[
+    platform(
+        name = "linux_" + architecture,
+        constraint_values = [
+            "@platforms//os:linux",
+            "@platforms//cpu:" + cpu,
+        ],
+    )
+    for architecture, cpu in {
+        "amd64": "x86_64",
+        "arm64": "arm64",
+    }.items()
+]
+
+[
+    pkgconfig_test(
+        name = "direct_" + architecture + "_test",
+        originals = originals(
+            architecture,
+            ["liblua5.4-dev"],
+        ),
+        platform = ":linux_" + architecture,
+        targets = [fixture_repo("liblua5.4-dev", architecture) + "//:pkgconfig"],
+    )
+    for architecture in [
+        "amd64",
+        "arm64",
+    ]
+]
+
+[
+    pkgconfig_test(
+        name = "transitive_" + architecture + ("_mergedusr" if mergedusr else "") + "_test",
+        mergedusr = mergedusr,
+        originals = originals(architecture),
+        platform = ":linux_" + architecture,
+        targets = [
+            repository + "//:pkgconfig",
+            repository + "//liblua5.4-dev:pkgconfig",
+            repository + "//liblua5.4-dev/" + architecture + ":pkgconfig",
+        ],
+    )
+    for architecture in [
+        "amd64",
+        "arm64",
+    ]
+    for mergedusr in [
+        False,
+        True,
+    ]
+    for repository in ["@pkgconfig_packages" + ("_mergedusr" if mergedusr else "")]
+]
+
+[
+    pkgconfig_test(
+        name = "custom_template_" + architecture + "_test",
+        originals = originals(architecture),
+        platform = ":linux_" + architecture,
+        targets = [
+            "@pkgconfig_custom_template//:pkgconfig",
+            "@pkgconfig_custom_template//liblua5.4-dev:pkgconfig",
+            "@pkgconfig_custom_template//liblua5.4-dev/" + architecture + ":pkgconfig",
+        ],
+    )
+    for architecture in [
+        "amd64",
+        "arm64",
+    ]
+]
+
+pkgconfig_test(
+    name = "architecture_independent_test",
+    originals = originals(
+        "amd64",
+        ["xtrans-dev"],
+    ),
+    platform = ":linux_amd64",
+    targets = [fixture_repo("xtrans-dev", "all") + "//:pkgconfig"],
+)
+
+pkgconfig_test(
+    name = "empty_test",
+    platform = ":linux_amd64",
+    targets = [
+        "@pkgconfig_empty//:pkgconfig",
+        fixture_repo("liblua5.4-0", "amd64") + "//:pkgconfig",
+        "@pkgconfig_packages//liblua5.4-0:pkgconfig",
+    ],
+)

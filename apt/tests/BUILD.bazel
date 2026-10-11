@@ -1,3 +1,4 @@
+load(":deb_export_test.bzl", "deb_export_tests")
 load(":deb_postfix_test.bzl", "deb_postfix_tests")
 load(":dpkg_status_test.bzl", "dpkg_status_tests")
 load(":dpkg_statusd_test.bzl", "dpkg_statusd_tests")
@@ -12,6 +13,8 @@ load(":util_test.bzl", "util_tests")
 load(":version_test.bzl", "version_tests")
 
 version_tests()
+
+deb_export_tests()
 
 deb_postfix_tests()
 
