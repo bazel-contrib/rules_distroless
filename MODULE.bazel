@@ -44,3 +44,21 @@ use_repo(
 bazel_dep(name = "gazelle", version = "0.34.0", dev_dependency = True, repo_name = "bazel_gazelle")
 bazel_dep(name = "bazel_skylib_gazelle_plugin", version = "1.5.0", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "8.0.1", dev_dependency = True)
+
+pkgconfig_fixtures = use_extension("//apt/tests/pkgconfig:fixtures.bzl", "fixtures", dev_dependency = True)
+use_repo(
+    pkgconfig_fixtures,
+    "pkgconfig_custom_template",
+    "pkgconfig_empty",
+    "pkgconfig_original_liblua5.4-dev_amd64",
+    "pkgconfig_original_liblua5.4-dev_arm64",
+    "pkgconfig_original_xtrans-dev_all",
+    "pkgconfig_original_zlib1g-dev_amd64",
+    "pkgconfig_original_zlib1g-dev_arm64",
+    "pkgconfig_packages",
+    "pkgconfig_packages_mergedusr",
+    "pkgconfig_test_liblua5.4-0-amd64_5.4.4-3-deb12u1",
+    "pkgconfig_test_liblua5.4-dev-amd64_5.4.4-3-deb12u1",
+    "pkgconfig_test_liblua5.4-dev-arm64_5.4.4-3-deb12u1",
+    "pkgconfig_test_xtrans-dev-all_1.4.0-1",
+)

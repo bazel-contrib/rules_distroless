@@ -1,0 +1,18 @@
+# A pre-existing custom template need not know about pkg-config exports.
+alias(
+    name = "data",
+    actual = {data_targets},
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "control",
+    actual = {control_targets},
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "{target_name}",
+    srcs = {deps} + [":data"],
+    visibility = ["//visibility:public"],
+)

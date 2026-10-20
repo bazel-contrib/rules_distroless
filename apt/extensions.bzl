@@ -854,6 +854,7 @@ Custom templates must define the following public targets so the package root's 
   * `:{target_name}` (target representing the package for this architecture, with `visibility = ["//visibility:public"]`, referenced by the root package target `//<package>` and hub repo `:packages` target). While the default template uses a `filegroup(srcs = {deps} + [":data"])`, custom templates may use other rules or omit transitive `{deps}` (e.g. for `include_transitive = False`).
 
 Template Syntax & Rules:
+  * `:pkgconfig` is generated separately from the template and exports the package's original pkg-config metadata and selected dependencies. Custom templates must not define this target name.
   * Root module references: Because templates render inside external hub repos (`@<depset_name>`), rules or files loaded from the root workspace must use the canonical repository prefix `@@//` (e.g. `load("@@//:custom_rule.bzl", "my_rule")`).
   * Brace escaping: Because Python-style `str.format()` is used, literal braces in templates (such as `{}` in comments or Starlark dictionaries) must be escaped by doubling them as `{{` and `}}`.
   * Quoting conventions: Built-in label variables (`{data_targets}`, `{control_targets}`, `{src}`) already include double quotes (e.g. `actual = {data_targets}`). String metadata (`{name}`, `{version}`, `{suite}`, `{arch}`, `{target_name}`, `{sha256}`, `{repo_name}`) and `additional_variables` do not (e.g. `package_name = "{name}"`). List variables (`{deps}`, `{urls}`) format as Starlark lists (e.g. `srcs = {deps} + [":data"]`).

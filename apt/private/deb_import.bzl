@@ -41,6 +41,7 @@ deb_export(
     name = "export",
     srcs = glob(["data.tar*"]),
     foreign_symlinks = {foreign_symlinks},
+    local_symlinks = {local_symlinks},
     symlink_outs = {symlink_outs},
     outs = {outs},
     visibility = ["//visibility:public"]
@@ -50,6 +51,12 @@ directory(
     name = "directory",
     srcs = {symlink_outs} + {outs},
     visibility = ["//visibility:public"]
+)
+
+filegroup(
+    name = "pkgconfig",
+    srcs = {pkgconfig_files},
+    visibility = ["//visibility:public"],
 )
 
 {cc_import_targets}
@@ -197,6 +204,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
     hpp_files = []
     hpp_files_woext = []
     pc_files = []
+    pc_files_to_parse = []
     o_files = []
     symlinks = {}
     so_regular_files = []
@@ -208,23 +216,21 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
 
         line = line[line.find(" ./") + 3:]
 
-        # Skip everything in man pages and examples
-        if line.startswith("usr/share"):
-            continue
-
         is_symlink_idx = line.find(" -> ")
         resolved_symlink = None
         if is_symlink_idx != -1:
             symlink_target = line[is_symlink_idx + 4:]
             line = line[:is_symlink_idx]
-            if line.endswith(".pc"):
-                continue
 
             # An absolute symlink
             if symlink_target.startswith("/"):
                 resolved_symlink = symlink_target.removeprefix("/")
             else:
                 resolved_symlink = resolve_symlink(line, symlink_target).removeprefix("./")
+
+        # Skip man pages and examples, but retain architecture-independent metadata.
+        if line.startswith("usr/share") and not (line.startswith("usr/share/pkgconfig/") and line.endswith(".pc")):
+            continue
 
         if (line.endswith(".so") or line.find(".so.") != -1) and line.find("lib") != -1:
             if line.find("libthread_db") != -1:
@@ -238,6 +244,11 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
             a_files.append(line)
         elif line.endswith(".pc") and line.find("pkgconfig"):
             pc_files.append(line)
+
+            # Preserve the existing CcInfo inputs: do not parse aliases twice or
+            # include metadata from usr/share, which was previously skipped.
+            if resolved_symlink == None and not line.startswith("usr/share"):
+                pc_files_to_parse.append(line)
         elif line.endswith(".h"):
             h_files.append(line)
         elif line.endswith(".hpp"):
@@ -255,19 +266,26 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
     # Resolve symlinks
     # For each symlink, we check:
     #  - If provided by a dependency -> rewrite to that dependency's label
-    #  - If shipped by this package  -> drop it from `symlinks` so it is emitted as a plain output
+    #  - If a local .pc alias        -> emit a symlink action targeting an output
+    #  - If otherwise local         -> extract it as a plain output
     #  - Else                        -> leave unresolved, and warn
     self_files = {
         f: None
-        for f in so_files + h_files + hpp_files + a_files + hpp_files_woext
+        for f in so_files + h_files + hpp_files + a_files + hpp_files_woext + pc_files
     }
     unresolved_symlinks = {}
+    local_symlinks = {}
     for (symlink, symlink_target) in symlinks.items():
         dep_repo = depends_file_map.get(symlink_target)
         if dep_repo:
             # dep_repo is a canonical repo name, so reference it with "@@".
             symlinks[symlink] = "@@{dep}//:{file}".format(dep = dep_repo, file = symlink_target)
         elif symlink_target in self_files:
+            # Extracting an absolute .pc symlink would point at the host's
+            # filesystem. Materialize local aliases as Bazel symlink actions,
+            # including relative aliases that may point at an absolute alias.
+            if symlink in pc_files:
+                local_symlinks[symlink] = symlink_target
             symlinks.pop(symlink)
         else:
             unresolved_symlinks[symlink] = symlink_target
@@ -285,7 +303,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
     # Extract, in a single pass, the files we need to inspect on disk:
     # - `.so` regular files because they may be linker scripts we need to inspect,
     # - pkgconfig files because we need them to generate cc targets.
-    files_to_extract = so_regular_files + pc_files
+    files_to_extract = so_regular_files + pc_files_to_parse
     if files_to_extract:
         rctx.execute(["mkdir", "-p", _EXTRACT_DIR])
         result = rctx.execute(
@@ -306,8 +324,8 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
 
     outs = []
 
-    for out in so_files + h_files + hpp_files + a_files + hpp_files_woext + o_files:
-        if out not in symlinks:
+    for out in so_files + h_files + hpp_files + a_files + hpp_files_woext + o_files + pc_files:
+        if out not in symlinks and out not in local_symlinks:
             outs.append(out)
 
     deps = []
@@ -318,7 +336,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
         )
 
     pkgconfigs = []
-    for pc in pc_files:
+    for pc in pc_files_to_parse:
         if rctx.path(_EXTRACT_DIR + "/" + pc).exists:
             pkgconfigs.append(pc)
 
@@ -448,7 +466,7 @@ so_library(
             direct_deps = [":_so_libs"],
         )
 
-    return (build_file_content, outs, symlinks)
+    return (build_file_content, outs, symlinks, pc_files, local_symlinks)
 
 def _deb_import_impl(rctx):
     rctx.download_and_extract(
@@ -467,7 +485,7 @@ def _deb_import_impl(rctx):
                 provided_by[file] = dep_repo
 
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
-    cc_import_targets, outs, symlinks = _discover_contents(
+    cc_import_targets, outs, symlinks, pc_files, local_symlinks = _discover_contents(
         rctx,
         rctx.attr.depends_on,
         provided_by,
@@ -493,7 +511,9 @@ def _deb_import_impl(rctx):
         cc_import_targets = cc_import_targets,
         outs = outs,
         foreign_symlinks = foreign_symlinks,
-        symlink_outs = symlinks.keys(),
+        local_symlinks = local_symlinks,
+        symlink_outs = symlinks.keys() + local_symlinks.keys(),
+        pkgconfig_files = pc_files,
     ))
 
 deb_import = repository_rule(
