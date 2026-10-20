@@ -1,7 +1,7 @@
 "unit tests for dependency set translation"
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//apt/private:translate_dependency_set.bzl", "check_template_variable_collision", "package_deps_for_architecture", "resolve_package_template")
+load("//apt/private:translate_dependency_set.bzl", "base_status", "check_template_variable_collision", "package_deps_for_architecture", "resolve_package_template")
 load("//apt/private:util.bzl", "util")
 
 _TEST_SUITE_PREFIX = "translate_dependency_set/"
@@ -149,8 +149,44 @@ def _check_template_variable_collision_test(ctx):
 
 check_template_variable_collision_test = unittest.make(_check_template_variable_collision_test)
 
+def _onto_base_test(ctx):
+    env = unittest.begin(ctx)
+
+    packages = {
+        "/repo/libc6:amd64=2.36": {"architecture": "amd64"},
+        "/repo/libfoo:amd64=1.0": {"architecture": "amd64"},
+    }
+    package = {"depends_on": ["/repo/libc6:amd64=2.36", "/repo/libfoo:amd64=1.0"]}
+
+    # A dependency the set does not install is the base's.
+    asserts.equals(
+        env,
+        ["@repo_libfoo-amd64_1.0//:data"],
+        package_deps_for_architecture(packages, package, "amd64", members = {"/repo/libfoo:amd64=1.0": True}),
+    )
+
+    stanzas = [
+        "Package: libc6\nStatus: install ok installed\nArchitecture: amd64\nVersion: 2.35",
+        "Package: libc6\nStatus: install ok installed\nArchitecture: i386\nVersion: 2.35",
+        "Package: tzdata\nStatus: install ok installed\nArchitecture: all\nVersion: 2024a",
+        "Package: bash\nStatus: install ok installed\nArchitecture: amd64\nVersion: 5.2",
+    ]
+
+    # What the set installs replaces the base's entry for it, for its own
+    # architecture only.
+    asserts.equals(
+        env,
+        stanzas[1] + "\n\n" + stanzas[3] + "\n\n",
+        base_status(stanzas, "amd64", ["libc6", "tzdata"]),
+    )
+
+    return unittest.end(env)
+
+onto_base_test = unittest.make(_onto_base_test)
+
 def translate_dependency_set_tests():
     no_mixed_architectures_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures")
     package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")
     resolve_package_template_test(name = _TEST_SUITE_PREFIX + "resolve_package_template")
     check_template_variable_collision_test(name = _TEST_SUITE_PREFIX + "check_template_variable_collision")
+    onto_base_test(name = _TEST_SUITE_PREFIX + "onto_base")

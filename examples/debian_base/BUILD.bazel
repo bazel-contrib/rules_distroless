@@ -1,0 +1,94 @@
+"""
+Packages installed onto a base image: `apt.install(bases = ...)` in
+../MODULE.bazel adds curl to Debian's own bullseye-slim, and only what
+bullseye-slim does not already have.
+"""
+
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@container_structure_test//:defs.bzl", "container_structure_test")
+load("@rules_oci//oci:defs.bzl", "oci_image")
+
+COMPATIBLE_WITH = select({
+    "@platforms//cpu:x86_64": ["@platforms//cpu:x86_64"],
+    "@platforms//cpu:arm64": ["@platforms//cpu:arm64"],
+}) + [
+    "@platforms//os:linux",
+]
+
+oci_image(
+    name = "image",
+    base = "@debian_bullseye",
+    target_compatible_with = COMPATIBLE_WITH,
+    tars = ["@bullseye_on_base//:flat"],
+)
+
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+platform(
+    name = "linux_amd64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+platform_transition_filegroup(
+    name = "image_platform",
+    srcs = [":image"],
+    target_platform = select({
+        "@platforms//cpu:arm64": ":linux_arm64",
+        "@platforms//cpu:x86_64": ":linux_amd64",
+    }),
+)
+
+container_structure_test(
+    name = "test",
+    configs = ["test.yaml"],
+    image = ":image_platform",
+    target_compatible_with = COMPATIBLE_WITH,
+)
+
+platform_transition_filegroup(
+    name = "flat_platform",
+    srcs = ["@bullseye_on_base//:flat"],
+    target_platform = select({
+        "@platforms//cpu:arm64": ":linux_arm64",
+        "@platforms//cpu:x86_64": ":linux_amd64",
+    }),
+)
+
+# The layer has curl, and none of what bullseye-slim already has: not libc6,
+# which curl depends on.
+genrule(
+    name = "_layer_curl_and_libc",
+    srcs = [":flat_platform"],
+    outs = ["layer_curl_and_libc"],
+    cmd = "$(BSDTAR_BIN) -tf $(execpath :flat_platform) | grep -E '^\\./usr/bin/curl$$|/libc\\.so\\.6$$' > $@",
+    target_compatible_with = COMPATIBLE_WITH,
+    toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"],
+)
+
+write_file(
+    name = "_layer_expected",
+    out = "layer_expected",
+    content = [
+        "./usr/bin/curl",
+        "",
+    ],
+    newline = "unix",
+)
+
+diff_test(
+    name = "layer_test",
+    file1 = ":_layer_curl_and_libc",
+    file2 = ":_layer_expected",
+    target_compatible_with = COMPATIBLE_WITH,
+)

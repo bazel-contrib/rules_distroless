@@ -63,6 +63,13 @@ bzl_library(
 )
 
 bzl_library(
+    name = "oci_base",
+    srcs = ["oci_base.bzl"],
+    visibility = ["//apt:__subpackages__"],
+    deps = [":deb_archive"],
+)
+
+bzl_library(
     name = "deb_import",
     srcs = ["deb_import.bzl"],
     visibility = ["//apt:__subpackages__"],
@@ -99,6 +106,7 @@ bzl_library(
     deps = [
         ":deb_postfix",
         ":lockfile",
+        ":oci_base",
         ":starlark_codegen_utils",
         ":util",
         "//apt:defs",

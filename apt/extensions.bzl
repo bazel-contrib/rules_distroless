@@ -6,6 +6,7 @@ load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
 load("//apt/private:deb_filemap.bzl", "deb_filemap")
 load("//apt/private:deb_import.bzl", "deb_import")
 load("//apt/private:lockfile.bzl", "lockfile")
+load("//apt/private:oci_base.bzl", "read_base")
 load("//apt/private:pgp.bzl", "pgp")
 load("//apt/private:translate_dependency_set.bzl", "check_template_variable_collision", "translate_dependency_set")
 load("//apt/private:util.bzl", "util")
@@ -405,6 +406,7 @@ def _distroless_extension(mctx):
     resolution_queue = []
     already_resolved = {}
     dependency_set_mergedusr = {}
+    dependency_set_bases = {}
     package_repo_roots = {
         False: {},
         True: {},
@@ -415,6 +417,12 @@ def _distroless_extension(mctx):
             if install.dependency_set:
                 current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
                 dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
+
+                bases = dependency_set_bases.setdefault(install.dependency_set, install.bases)
+                if sorted([str(b) for b in bases]) != sorted([str(b) for b in install.bases]):
+                    fail("apt.install: every install into dependency set '%s' must name the same bases." % install.dependency_set)
+            elif install.bases:
+                fail("apt.install: `bases` needs a `dependency_set`, which is what is installed onto them.")
 
             for dep_constraint in install.packages:
                 constraint = version_constraint.parse_dep(dep_constraint)
@@ -462,6 +470,17 @@ def _distroless_extension(mctx):
                         install.mergedusr,
                         False,
                     ))
+
+    # What each dependency set's bases have installed, by architecture.
+    installed_by_set = {}
+    for (depset_name, bases) in dependency_set_bases.items():
+        for label in bases:
+            base = read_base(mctx, label)
+            installed = installed_by_set.setdefault(depset_name, {})
+            if base.architecture in installed:
+                fail("apt.install: dependency set '%s' has two bases for %s." % (depset_name, base.architecture))
+            installed[base.architecture] = deb_repository.new()
+            installed[base.architecture].parse_package_index("\n\n".join(base.stanzas), [], "base")
 
     for i in range(0, ITERATION_MAX + 1):
         if not len(resolution_queue):
@@ -552,6 +571,23 @@ def _distroless_extension(mctx):
             arch_set = dependency_set["sets"].setdefault(arch, {})
             arch_set[pkg_short_key] = package["Version"]
 
+            # Onto a base, the set is the package and those of its
+            # dependencies the base does not already satisfy.
+            if dependency_set_name in installed_by_set:
+                installed = installed_by_set[dependency_set_name]
+                if arch not in installed:
+                    fail("apt.install: dependency set '%s' installs %s for %s, and none of its bases is %s. Add one, or name the architecture (%s:<arch>)." % (dependency_set_name, name, arch, arch, name))
+                (_, needed, _, _) = resolver.resolve_all(
+                    name = name,
+                    version = version,
+                    arch = arch,
+                    suites = suites,
+                    installed = installed[arch],
+                )
+                for dep in needed:
+                    glock.add_package(dep, arch)
+                    arch_set[lockfile.short_package_key(dep, arch)] = dep["Version"]
+
     package_templates = []
     for mod in mctx.modules:
         for pt in mod.tags.package_template:
@@ -593,6 +629,7 @@ def _distroless_extension(mctx):
         translate_dependency_set(
             name = depset_name,
             depset_name = depset_name,
+            bases = dependency_set_bases.get(depset_name, []),
             lock_content = lock_content,
             mergedusr = depset_mergedusr,
             package_templates = json.encode(depset_templates),
@@ -829,6 +866,11 @@ install = tag_class(
         "suites": attr.string_list(),
         "include_transitive": attr.bool(default = True),
         "mergedusr": attr.bool(default = False),
+        "bases": attr.label_list(
+            doc = """The images the dependency set is installed onto, one per architecture: each the `index.json` of a single-platform OCI image layout, such as `@ubuntu_linux_amd64//:index.json` from rules_oci's `oci.pull`.
+
+A dependency that a package the base has installed already satisfies, as its dpkg status (or distroless's `status.d`) says, is not installed, and neither is anything only it needs; the packages named are always installed. The dependency set's `dpkg_status` then starts from the base's own, so the image's lists both. Every install into a dependency set must name the same bases.""",
+        ),
     },
 )
 

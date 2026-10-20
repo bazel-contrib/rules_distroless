@@ -1,0 +1,14 @@
+schemaVersion: "2.0.0"
+
+commandTests:
+  - name: "curl runs"
+    command: "curl"
+    args: ["--version"]
+    expectedOutput: ["^curl 7\\."]
+  # dpkg still knows what the base installed, and knows curl too.
+  - name: "dpkg knows the base's packages and curl"
+    command: "dpkg"
+    args: ["--status", "libc6", "curl"]
+    expectedOutput:
+      - "Package: libc6\nStatus: install ok installed"
+      - "Package: curl\nStatus: install ok installed"

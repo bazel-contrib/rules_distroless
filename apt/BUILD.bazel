@@ -24,6 +24,7 @@ bzl_library(
         "//apt/private:deb_filemap",
         "//apt/private:deb_import",
         "//apt/private:lockfile",
+        "//apt/private:oci_base",
         "//apt/private:pgp",
         "//apt/private:translate_dependency_set",
         "//apt/private:util",
