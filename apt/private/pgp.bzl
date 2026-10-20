@@ -2,13 +2,69 @@
 
 load(":util.bzl", "util")
 
+_BOUNCYCASTLE_VERSION = "1.86"
+_BOUNCYCASTLE_JARS = {
+    "bcpg-jdk18on": "8a52ea45b2063f6d41b8ca94409f255a1f4604922f7451c18a7cfd3a3c5b85ab",
+    "bcprov-jdk18on": "2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f",
+    "bcutil-jdk18on": "1c268e15f785aafb1e4670d8d6e5f856f69475e96c162dadcd1ff9b350e9139f",
+}
+
 def _find_pgp_verifier(mctx):
-    """Detect available OpenPGP verifier, preferring sqv over gpgv."""
+    """Detect an OpenPGP verifier: sqv, then gpgv, then the hermetic java one."""
     if mctx.which("sqv"):
         return "sqv"
     if mctx.which("gpgv"):
         return "gpgv"
-    return None
+    return "java"
+
+def _remotejdk_repo(mctx):
+    """Name of the rules_java remote JDK 21 repo that matches the host."""
+    os_name = mctx.os.name.lower()
+    arch = mctx.os.arch.lower()
+    if "mac" in os_name:
+        os_part = "macos"
+    elif "windows" in os_name:
+        os_part = "win"
+    elif "linux" in os_name:
+        os_part = "linux"
+    else:
+        fail("No hermetic JDK for host OS '{}'. Install `sqv` or `gpgv` on PATH.".format(mctx.os.name))
+
+    if arch in ["x86_64", "amd64"]:
+        arch_part = ""
+    elif arch in ["aarch64", "arm64"]:
+        arch_part = "_arm64" if os_part == "win" else "_aarch64"
+    elif arch in ["ppc64le", "s390x", "riscv64"]:
+        arch_part = "_" + arch
+    else:
+        fail("No hermetic JDK for host architecture '{}'. Install `sqv` or `gpgv` on PATH.".format(mctx.os.arch))
+    return "remotejdk21_{}{}".format(os_part, arch_part)
+
+def _hermetic_java_cmd(mctx):
+    """Command prefix that runs apt/private/Verify.java on a hermetic JDK with BouncyCastle.
+
+    Used when neither sqv nor gpgv is on PATH so that building does not depend on host tools.
+    The JDK comes from rules_java and the BouncyCastle jars are pinned by sha256.
+    """
+    repo = _remotejdk_repo(mctx)
+    is_windows = "windows" in mctx.os.name.lower()
+    java = mctx.path(Label("@{}//:bin/{}".format(repo, "java.exe" if is_windows else "java")))
+
+    jars = []
+    for (name, sha256) in _BOUNCYCASTLE_JARS.items():
+        output = "bouncycastle/{}-{}.jar".format(name, _BOUNCYCASTLE_VERSION)
+        mctx.download(
+            url = "https://repo1.maven.org/maven2/org/bouncycastle/{name}/{version}/{name}-{version}.jar".format(
+                name = name,
+                version = _BOUNCYCASTLE_VERSION,
+            ),
+            output = output,
+            sha256 = sha256,
+        )
+        jars.append(str(mctx.path(output)))
+
+    verify_java = mctx.path(Label("//apt/private:Verify.java"))
+    return [str(java), "-cp", (";" if is_windows else ":").join(jars), str(verify_java)]
 
 def _format_verifier_output(res, verifier):
     details = []
@@ -35,9 +91,13 @@ def _is_verification_success(res, verifier):
             return True
     return False
 
-def _verifier_cmd(verifier, keyring_args, mode, sig_path, msg_path = None, out_path = None):
-    """Builds execution command arguments for gpgv or sqv."""
-    if verifier == "gpgv":
+def _verifier_cmd(verifier, keyring_args, mode, sig_path, msg_path = None, out_path = None, java_cmd = None):
+    """Builds execution command arguments for gpgv, sqv or the hermetic java verifier."""
+    if verifier == "java":
+        if mode == "clearsigned":
+            return java_cmd + ["clearsigned"] + keyring_args + ["--output", str(out_path), str(sig_path)]
+        return java_cmd + ["detached"] + keyring_args + [str(sig_path), str(msg_path)]
+    elif verifier == "gpgv":
         cmd = ["gpgv", "--status-fd", "1"] + keyring_args
         if mode == "clearsigned":
             return cmd + [str(sig_path)]
@@ -89,8 +149,8 @@ def _is_ascii_armored(content):
     """Returns True if the content is an ASCII-armored OpenPGP block."""
     return "-----BEGIN PGP" in content
 
-def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_verified_path):
-    """Verifies InRelease using gpgv or sqv and returns (success, content_or_error)."""
+def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_verified_path, java_cmd = None):
+    """Verifies InRelease using gpgv, sqv or java and returns (success, content_or_error)."""
 
     # sqv creates its output with create_new(true) and fails with os error 17 if the output file already exists.
     # Since module_ctx lacks repository_ctx.delete(), we remove any leftover file from earlier runs.
@@ -102,6 +162,7 @@ def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_veri
         "clearsigned",
         mctx.path(in_release_path),
         out_path = mctx.path(output_verified_path),
+        java_cmd = java_cmd,
     )
     res = mctx.execute(cmd)
     if not _is_verification_success(res, verifier):
@@ -110,14 +171,15 @@ def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_veri
         return (True, _strip_pgp_clearsign_armor(mctx.read(in_release_path)))
     return (True, mctx.read(output_verified_path))
 
-def _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, release_path):
-    """Verifies detached Release.gpg signature against Release using gpgv or sqv."""
+def _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, release_path, java_cmd = None):
+    """Verifies detached Release.gpg signature against Release using gpgv, sqv or java."""
     cmd = _verifier_cmd(
         verifier,
         keyring_args,
         "detached",
         mctx.path(release_gpg_path),
         msg_path = mctx.path(release_path),
+        java_cmd = java_cmd,
     )
     res = mctx.execute(cmd)
     if not _is_verification_success(res, verifier):
@@ -177,8 +239,7 @@ def _prepare_keyring_paths(mctx, verifier, gpg_keys):
 def _download_and_verify_release(mctx, urls, dist, gpg_keys):
     """Downloads InRelease (or Release + Release.gpg) and verifies with gpgv/sqv."""
     verifier = _find_pgp_verifier(mctx)
-    if not verifier:
-        fail("GPG verification requested for dist '{}', but neither `gpgv` nor `sqv` was found on PATH. Please install a modern version of `gpgv` (GnuPG 2.x) or `sqv` (Sequoia PGP >= 1.0).".format(dist))
+    java_cmd = _hermetic_java_cmd(mctx) if verifier == "java" else None
 
     keyring_paths = _prepare_keyring_paths(mctx, verifier, gpg_keys)
     keyring_args = _build_keyring_args(keyring_paths)
@@ -197,7 +258,7 @@ def _download_and_verify_release(mctx, urls, dist, gpg_keys):
         )
         if download.success:
             mctx.report_progress("Verifying InRelease signature using {}".format(verifier))
-            ok, res = _verify_inrelease(mctx, verifier, keyring_args, in_release_path, verified_path)
+            ok, res = _verify_inrelease(mctx, verifier, keyring_args, in_release_path, verified_path, java_cmd)
             if ok:
                 return res
             fail("GPG verification failed for InRelease from {}:\n{}".format(in_release_url, res))
@@ -217,7 +278,7 @@ def _download_and_verify_release(mctx, urls, dist, gpg_keys):
             dl_gpg = mctx.download(url = release_gpg_url, output = release_gpg_path, allow_fail = True)
             if dl_gpg.success:
                 mctx.report_progress("Verifying Release signature using {}".format(verifier))
-                ok, res = _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, release_path)
+                ok, res = _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, release_path, java_cmd)
                 if ok:
                     return res
                 fail("GPG verification failed for Release from {}:\n{}".format(release_url, res))

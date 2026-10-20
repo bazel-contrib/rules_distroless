@@ -28,6 +28,22 @@ bazel_lib_toolchains = use_extension("@bazel_lib//lib:extensions.bzl", "toolchai
 use_repo(bazel_lib_toolchains, "zstd_toolchains")
 use_repo(bazel_lib_toolchains, "coreutils_toolchains")
 
+# Hermetic JDK used to run the OpenPGP verifier (apt/private/Verify.java) when neither
+# sqv nor gpgv is on PATH.
+java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")
+use_repo(
+    java_toolchains,
+    "remotejdk21_linux",
+    "remotejdk21_linux_aarch64",
+    "remotejdk21_linux_ppc64le",
+    "remotejdk21_linux_riscv64",
+    "remotejdk21_linux_s390x",
+    "remotejdk21_macos",
+    "remotejdk21_macos_aarch64",
+    "remotejdk21_win",
+    "remotejdk21_win_arm64",
+)
+
 tar_toolchains = use_extension("@tar.bzl//tar:extensions.bzl", "toolchains")
 use_repo(
     tar_toolchains,

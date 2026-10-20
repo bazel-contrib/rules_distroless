@@ -55,7 +55,9 @@ git_override(
 ## GPG / OpenPGP Signature Verification
 
 `rules_distroless` verifies cryptographic OpenPGP signatures on repository indices
-(`InRelease` or `Release` + `Release.gpg`) using `gpgv` or `sqv` on `PATH`:
+(`InRelease` or `Release` + `Release.gpg`). It uses `sqv` or `gpgv` when one is on `PATH`, and otherwise
+falls back to a hermetic verifier ([BouncyCastle](https://www.bouncycastle.org/) on a `rules_java` remote JDK), so
+no host tools are required:
 
 ```starlark
 apt.sources_list(

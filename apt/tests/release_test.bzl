@@ -182,6 +182,13 @@ def _verifier_cmd_test(ctx):
     cmd_sqv_detached = pgp.verifier_cmd("sqv", ["--keyring", "k.gpg"], "detached", "Release.gpg", msg_path = "Release")
     asserts.equals(env, ["sqv", "--keyring", "k.gpg", "--signature-file", "Release.gpg", "Release"], cmd_sqv_detached)
 
+    java = ["java", "-cp", "bc.jar", "Verify.java"]
+    cmd_java_clear = pgp.verifier_cmd("java", ["--keyring", "k.gpg"], "clearsigned", "InRelease", out_path = "Release.verified", java_cmd = java)
+    asserts.equals(env, java + ["clearsigned", "--keyring", "k.gpg", "--output", "Release.verified", "InRelease"], cmd_java_clear)
+
+    cmd_java_detached = pgp.verifier_cmd("java", ["--keyring", "k.gpg"], "detached", "Release.gpg", msg_path = "Release", java_cmd = java)
+    asserts.equals(env, java + ["detached", "--keyring", "k.gpg", "Release.gpg", "Release"], cmd_java_detached)
+
     return unittest.end(env)
 
 def _verification_success_test(ctx):
