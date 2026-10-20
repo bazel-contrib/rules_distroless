@@ -110,7 +110,7 @@ bzl_library(
     name = "deb_export",
     srcs = ["deb_export.bzl"],
     visibility = ["//apt:__subpackages__"],
-    deps = ["@aspect_bazel_lib//lib:tar"],
+    deps = ["@tar.bzl//tar:tar"],
 )
 
 bzl_library(
