@@ -31,6 +31,10 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source
     404 warnings for formats the remote doesn't serve.
     """
     target_triple = "{}/{}/{}".format(dist, comp, arch)
+    bz2_cmd = mctx.path(Label("@bzip2//:entrypoint"))
+    gz_cmd = mctx.path(Label("@gzip//:entrypoint"))
+    xz_cmd = mctx.path(Label("@xz//:entrypoint"))
+    true_cmd = mctx.path(Label("@true//:entrypoint"))
 
     # See https://linux.die.net/man/1/xz , https://linux.die.net/man/1/gzip , and https://linux.die.net/man/1/bzip2
     #  --keep       -> keep the original file (Bazel might be still committing the output to the cache)
@@ -39,17 +43,17 @@ def _start_downloads(mctx, urls, dist, comp, arch, integrity, index_type, source
     # Order of these matter, we want to try the one that is most likely first.
     if index_type == "Packages":
         extensions = [
-            (".xz", ["xz", "--decompress", "--keep", "--force"]),
-            (".gz", ["gzip", "--decompress", "--keep", "--force"]),
-            (".bz2", ["bzip2", "--decompress", "--keep", "--force"]),
-            ("", ["true"]),
+            (".xz", [xz_cmd, "--decompress", "--keep", "--force"]),
+            (".gz", [gz_cmd, "--decompress", "--keep", "--force"]),
+            (".bz2", [bz2_cmd, "--decompress", "--keep", "--force"]),
+            ("", [true_cmd]),
         ]
     else:
         extensions = [
-            (".gz", ["gzip", "--decompress", "--keep", "--force"]),
-            (".xz", ["xz", "--decompress", "--keep", "--force"]),
-            (".bz2", ["bzip2", "--decompress", "--keep", "--force"]),
-            ("", ["true"]),
+            (".gz", [gz_cmd, "--decompress", "--keep", "--force"]),
+            (".xz", [xz_cmd, "--decompress", "--keep", "--force"]),
+            (".bz2", [bz2_cmd, "--decompress", "--keep", "--force"]),
+            ("", [true_cmd]),
         ]
 
     # Filter extensions if we have verified hashes from Release file
