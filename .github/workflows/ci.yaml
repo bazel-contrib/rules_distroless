@@ -61,16 +61,71 @@ jobs:
           if-no-files-found: ignore
           retention-days: 5
 
+  # apt signature verification falls back to a hermetic verifier (apt/private/Verify.java) when neither sqv nor
+  # gpgv is on PATH. The runners above have gpgv, so exercise the fallback explicitly.
+  hermetic-pgp:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: bazel-contrib/setup-bazel@0.19.0
+      - name: Fixture tests for Verify.java
+        run: |
+          set -euo pipefail
+          version=1.86
+          dir="$RUNNER_TEMP/bouncycastle"
+          mkdir -p "$dir"
+          fetch() {
+            curl -fsSL -o "$dir/$1-$version.jar" "https://repo1.maven.org/maven2/org/bouncycastle/$1/$version/$1-$version.jar"
+            echo "$2  $dir/$1-$version.jar" | shasum -a 256 -c -
+          }
+          # Keep in sync with _BOUNCYCASTLE_JARS in apt/private/pgp.bzl.
+          fetch bcpg-jdk18on 8a52ea45b2063f6d41b8ca94409f255a1f4604922f7451c18a7cfd3a3c5b85ab
+          fetch bcprov-jdk18on 2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f
+          fetch bcutil-jdk18on 1c268e15f785aafb1e4670d8d6e5f856f69475e96c162dadcd1ff9b350e9139f
+          apt/tests/pgp/verify_test.sh java \
+            "$dir/bcpg-jdk18on-$version.jar:$dir/bcprov-jdk18on-$version.jar:$dir/bcutil-jdk18on-$version.jar" \
+            apt/private/Verify.java
+      - name: Build a PATH without any OpenPGP tools
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/no-openpgp-tools"
+          mkdir -p "$bin"
+          IFS=: read -ra dirs <<< "$PATH"
+          for d in "${dirs[@]}"; do
+            for f in "$d"/*; do
+              n=$(basename "$f")
+              case "$n" in gpg*|dirmngr|sq|sqv) continue ;; esac
+              [ -e "$bin/$n" ] || ln -s "$f" "$bin/$n" 2>/dev/null || true
+            done
+          done
+          echo "NO_OPENPGP_PATH=$bin" >> "$GITHUB_ENV"
+      - name: e2e/smoke with the hermetic verifier
+        run: bazel test //... --repo_env=PATH="$NO_OPENPGP_PATH"
+        working-directory: e2e/smoke
+      - name: e2e/invalid_key is rejected by the hermetic verifier
+        run: |
+          if bazel build //... --repo_env=PATH="$NO_OPENPGP_PATH" > stderr.log 2>&1; then
+            echo "Expected build to fail, but it succeeded!"
+            exit 1
+          fi
+          cat stderr.log
+          grep -q "GPG verification failed" stderr.log
+        working-directory: e2e/invalid_key
+
   # Single job to use as a required status check, since the matrix job names
   # above vary and can't be pinned individually in branch protection rules.
   ci:
     if: ${{ !cancelled() }}
-    needs: [test]
+    needs: [test, hermetic-pgp]
     runs-on: ubuntu-latest
     steps:
       - name: Check matrix job results
         run: |
-          if [[ "${{ needs.test.result }}" != "success" ]]; then
-            echo "One or more matrix jobs failed: ${{ needs.test.result }}"
+          if [[ "${{ needs.test.result }}" != "success" || "${{ needs.hermetic-pgp.result }}" != "success" ]]; then
+            echo "One or more matrix jobs failed: test=${{ needs.test.result }} hermetic-pgp=${{ needs.hermetic-pgp.result }}"
             exit 1
           fi

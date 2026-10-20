@@ -1,0 +1,38 @@
+# name	mode	expected exit	keyring(s), comma separated	args (detached: signature message; clearsigned: file [expected verified text])
+# Exit codes: 0 verified, 1 not verified, 2 error. All cases run as of 2026-10-20T23:00:00Z (see verify_test.sh).
+# gpgv agrees on every case except the ones marked "policy": sqv-style policy rejects what gpgv accepts.
+detached_good_binary	detached	0	good.asc	good_bin.sig	msg.txt
+detached_good_text	detached	0	good.asc	good_text.sig	msg.txt
+detached_multi_block_keyring	detached	0	expk_then_good.asc	good_bin.sig	msg.txt
+detached_wrong_message	detached	1	good.asc	good_bin.sig	b_msg_other
+detached_unknown_key	detached	1	revk.asc	good_bin.sig	msg.txt
+detached_sha1 (policy)	detached	1	good.asc	sha1.sig	msg.txt
+detached_md5	detached	1	good.asc	md5.sig	msg.txt
+detached_expired_signature	detached	1	good.asc	sigexp.sig	msg.txt
+detached_expired_key (policy)	detached	1	expk.asc	expk.sig	msg.txt
+detached_revoked_key (policy)	detached	1	revk.asc	revk.sig	msg.txt
+detached_class_standalone	detached	1	b_good.pub.asc	b_f_type02.sig	b_msg
+detached_class_certification	detached	1	b_good.pub.asc	b_f_type13.sig	b_msg
+detached_certification_replay	detached	1	b_good.pub.asc	b_forged_Release.gpg	b_forged_Release
+detached_encryption_only_subkey	detached	1	b_good.pub.asc	b_f_encsub.sig	b_msg
+detached_text_mode_lone_cr	detached	1	b_good.pub.asc	b_text_detached.asc	b_msg_lonecr
+keyring_not_a_keyring	detached	2	notakey.txt	good_bin.sig	msg.txt
+keyring_empty_file	detached	2	empty.kr	good_bin.sig	msg.txt
+clearsigned_good	clearsigned	0	good.asc	cs_good.asc	out_good.txt
+clearsigned_trailing_whitespace	clearsigned	0	good.asc	cs_ws.asc	out_ws.txt
+clearsigned_dash_escaping	clearsigned	0	good.asc	cs_dash.asc
+clearsigned_no_final_newline	clearsigned	0	good.asc	cs_nonl.asc	out_nonl.txt
+clearsigned_blank_lines	clearsigned	0	good.asc	cs_blank.asc
+clearsigned_crlf_line_endings	clearsigned	0	good.asc	mut_crlf_all.asc	out_good.txt
+clearsigned_trailing_whitespace_added	clearsigned	0	good.asc	mut_trailing_ws_added.asc	out_good.txt
+clearsigned_text_before_armor	clearsigned	0	good.asc	mut_prefix_garbage.asc	out_good.txt
+clearsigned_text_after_signature	clearsigned	0	good.asc	mut_suffix_garbage.asc	out_good.txt
+clearsigned_changed_character	clearsigned	1	good.asc	mut_flip_char.asc
+clearsigned_extra_line	clearsigned	1	good.asc	mut_extra_line.asc
+clearsigned_lone_cr	clearsigned	1	good.asc	mut_lone_cr.asc
+clearsigned_lone_cr_after_header	clearsigned	1	good.asc	mut_lone_cr_sha.asc
+clearsigned_sha1 (policy)	clearsigned	1	good.asc	cs_sha1.asc
+clearsigned_md5	clearsigned	1	good.asc	cs_md5.asc
+clearsigned_expired_signature	clearsigned	1	good.asc	cs_sigexp.asc
+clearsigned_truncated	clearsigned	2	good.asc	mut_truncated.asc
+clearsigned_no_signature	clearsigned	2	good.asc	mut_no_sig.asc

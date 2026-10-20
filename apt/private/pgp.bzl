@@ -9,6 +9,13 @@ _BOUNCYCASTLE_JARS = {
     "bcutil-jdk18on": "1c268e15f785aafb1e4670d8d6e5f856f69475e96c162dadcd1ff9b350e9139f",
 }
 
+# The hermetic verifier is a JVM. Do not let options from the user's environment change its behavior.
+_JAVA_ENVIRONMENT = {
+    "JAVA_TOOL_OPTIONS": "",
+    "JDK_JAVA_OPTIONS": "",
+    "_JAVA_OPTIONS": "",
+}
+
 def _find_pgp_verifier(mctx):
     """Detect an OpenPGP verifier: sqv, then gpgv, then the hermetic java one."""
     if mctx.which("sqv"):
@@ -73,7 +80,13 @@ def _format_verifier_output(res, verifier):
     if res.stdout:
         details.append("stdout:\n" + res.stdout)
     out_str = "\n".join(details) if details else "no output"
-    return "{} exit code: {}\n{}".format(verifier, res.return_code, out_str)
+    prefix = ""
+    if verifier == "java" and res.return_code != 1:
+        prefix = "The hermetic OpenPGP verifier could not process its inputs. This is an error, not a bad signature.\n"
+    return "{}{} exit code: {}\n{}".format(prefix, verifier, res.return_code, out_str)
+
+def _execute_verifier(mctx, verifier, cmd):
+    return mctx.execute(cmd, environment = _JAVA_ENVIRONMENT if verifier == "java" else {})
 
 def _is_verification_success(res, verifier):
     """Evaluates whether the verifier execution resulted in a successful verification."""
@@ -107,7 +120,7 @@ def _verifier_cmd(verifier, keyring_args, mode, sig_path, msg_path = None, out_p
             return ["sqv"] + keyring_args + ["--cleartext", "--output", str(out_path), str(sig_path)]
         return ["sqv"] + keyring_args + ["--signature-file", str(sig_path), str(msg_path)]
     else:
-        fail("No OpenPGP verifier found (gpgv or sqv).")
+        fail("Unknown OpenPGP verifier '{}'.".format(verifier))
 
 def _strip_pgp_clearsign_armor(content):
     """Strips PGP cleartext signature framing from InRelease content."""
@@ -154,7 +167,8 @@ def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_veri
 
     # sqv creates its output with create_new(true) and fails with os error 17 if the output file already exists.
     # Since module_ctx lacks repository_ctx.delete(), we remove any leftover file from earlier runs.
-    mctx.execute(["rm", "-f", str(mctx.path(output_verified_path))])
+    if verifier != "java":
+        mctx.execute(["rm", "-f", str(mctx.path(output_verified_path))])
 
     cmd = _verifier_cmd(
         verifier,
@@ -164,7 +178,7 @@ def _verify_inrelease(mctx, verifier, keyring_args, in_release_path, output_veri
         out_path = mctx.path(output_verified_path),
         java_cmd = java_cmd,
     )
-    res = mctx.execute(cmd)
+    res = _execute_verifier(mctx, verifier, cmd)
     if not _is_verification_success(res, verifier):
         return (False, _format_verifier_output(res, verifier))
     if verifier == "gpgv":
@@ -181,7 +195,7 @@ def _verify_detached_release(mctx, verifier, keyring_args, release_gpg_path, rel
         msg_path = mctx.path(release_path),
         java_cmd = java_cmd,
     )
-    res = mctx.execute(cmd)
+    res = _execute_verifier(mctx, verifier, cmd)
     if not _is_verification_success(res, verifier):
         return (False, _format_verifier_output(res, verifier))
     return (True, mctx.read(release_path))
@@ -237,7 +251,7 @@ def _prepare_keyring_paths(mctx, verifier, gpg_keys):
     return paths
 
 def _download_and_verify_release(mctx, urls, dist, gpg_keys):
-    """Downloads InRelease (or Release + Release.gpg) and verifies with gpgv/sqv."""
+    """Downloads InRelease (or Release + Release.gpg) and verifies with sqv, gpgv or the hermetic java verifier."""
     verifier = _find_pgp_verifier(mctx)
     java_cmd = _hermetic_java_cmd(mctx) if verifier == "java" else None
 
