@@ -68,9 +68,16 @@ bzl_library(
     visibility = ["//apt:__subpackages__"],
     deps = [
         ":deb_archive",
+        ":headers",
         ":linker_script",
         ":pkgconfig",
     ],
+)
+
+bzl_library(
+    name = "headers",
+    srcs = ["headers.bzl"],
+    visibility = ["//apt:__subpackages__"],
 )
 
 bzl_library(
