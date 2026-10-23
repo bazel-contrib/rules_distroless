@@ -8,6 +8,7 @@ bzl_library(
     srcs = ["defs.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//distroless/private:accounts",
         "//distroless/private:cacerts",
         "//distroless/private:flatten",
         "//distroless/private:group",

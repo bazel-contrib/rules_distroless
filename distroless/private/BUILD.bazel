@@ -1,5 +1,32 @@
 load("@bazel_lib//:bzl_library.bzl", "bzl_library")
 load("@rules_java//java:defs.bzl", "java_binary")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+
+py_library(
+    name = "accounts_lib",
+    srcs = ["accounts.py"],
+    visibility = ["//distroless/tests:__subpackages__"],
+)
+
+py_binary(
+    name = "accounts_tool",
+    srcs = ["accounts.py"],
+    main = "accounts.py",
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "accounts",
+    srcs = ["accounts.bzl"],
+    visibility = ["//distroless:__subpackages__"],
+    deps = [
+        ":group",
+        ":passwd",
+        ":tar",
+        "@bazel_lib//lib:utils",
+        "@tar.bzl//tar:tar",
+    ],
+)
 
 exports_files([
     "cacerts.sh",
