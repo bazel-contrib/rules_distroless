@@ -1,6 +1,7 @@
 "deb_import"
 
 load(":deb_archive.bzl", "data_archive", "host_bsdtar")
+load(":headers.bzl", "is_include_fragment")
 load(":linker_script.bzl", "linker_script")
 load(":lockfile.bzl", "lockfile")
 load(":pkgconfig.bzl", "pkgconfig")
@@ -238,7 +239,7 @@ def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedus
             a_files.append(line)
         elif line.endswith(".pc") and line.find("pkgconfig"):
             pc_files.append(line)
-        elif line.endswith(".h"):
+        elif line.endswith(".h") or is_include_fragment(line):
             h_files.append(line)
         elif line.endswith(".hpp"):
             hpp_files.append(line)

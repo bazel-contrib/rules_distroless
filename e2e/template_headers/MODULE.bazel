@@ -1,0 +1,29 @@
+bazel_dep(name = "bazel_skylib", version = "1.5.0", dev_dependency = True)
+bazel_dep(name = "platforms", version = "0.0.10", dev_dependency = True)
+bazel_dep(name = "rules_cc", version = "0.2.8", dev_dependency = True)
+bazel_dep(name = "rules_distroless", version = "0.0.0", dev_dependency = True)
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1", dev_dependency = True)
+
+local_path_override(
+    module_name = "rules_distroless",
+    path = "../..",
+)
+
+# Use the real importer and checksum-pinned SDKs, without resolving an APT index.
+deb_import = use_repo_rule("@rules_distroless//apt/private:deb_import.bzl", "deb_import")
+
+deb_import(
+    name = "boost_amd64",
+    package_name = "libboost1.83-dev",
+    sha256 = "1f11fc6fb2ffe9378a0f0ebc8f2fd9223fb958b4a40bb9381c67a8857d947ca3",
+    target_name = "libboost1.83-dev",
+    urls = ["https://deb.debian.org/debian/pool/main/b/boost1.83/libboost1.83-dev_1.83.0-4.2_amd64.deb"],
+)
+
+deb_import(
+    name = "boost_arm64",
+    package_name = "libboost1.83-dev",
+    sha256 = "0f82bfbd6d1afae0d03da64e4e2ac531effcf66e89e962a4fb6bebf0ec35db6e",
+    target_name = "libboost1.83-dev",
+    urls = ["https://deb.debian.org/debian/pool/main/b/boost1.83/libboost1.83-dev_1.83.0-4.2_arm64.deb"],
+)

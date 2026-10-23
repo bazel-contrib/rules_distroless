@@ -1,0 +1,46 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+load(":headers_test.bzl", "declared_headers_test", "headers_only")
+
+package(default_testonly = True)
+
+headers_only(
+    name = "boost_headers",
+    dep = select({
+        "@platforms//cpu:x86_64": "@boost_amd64//:libboost1.83",
+        "@platforms//cpu:arm64": "@boost_arm64//:libboost1.83",
+    }),
+)
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "CMakeLists.txt",
+        "probe.cc",
+    ],
+)
+
+cmake(
+    name = "probe",
+    cache_entries = {
+        "CMAKE_BUILD_TYPE": "Release",
+        "DECLARED_BOOST_ROOT": "$$EXT_BUILD_DEPS$$",
+    },
+    lib_source = ":sources",
+    out_include_dir = "",
+    out_static_libs = ["libtemplate_headers.a"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [":boost_headers"],
+)
+
+declared_headers_test(
+    name = "declared_headers_test",
+    target_under_test = ":boost_headers",
+)
+
+cc_test(
+    name = "foreign_headers_test",
+    srcs = ["test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [":probe"],
+)
