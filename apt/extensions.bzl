@@ -333,63 +333,119 @@ def _distroless_extension(mctx):
     resolution_queue = []
     already_resolved = {}
     dependency_set_mergedusr = {}
+    root_expose_deps = {}
     package_repo_roots = {
         False: {},
         True: {},
     }
 
+    # `apt.install` and `apt.download` are the same operation except for one
+    # thing: whether the generated package target carries the package's
+    # dependency closure. Normalize both into a single list of requests, each
+    # naming the repository it contributes to.
+    install_requests = []
+    install_repos = {}
+    download_repos = {}
+
     for mod in mctx.modules:
         for install in mod.tags.install:
+            if not install.include_transitive:
+                fail(
+                    "\n\n`include_transitive = False` is no longer accepted by `apt.install`.\n\n" +
+                    "It never took effect; packages were always installed with their full\n" +
+                    "dependency closure. Use `apt.download` to generate a repository whose\n" +
+                    "package targets carry only their own data:\n\n" +
+                    "    apt.download(\n" +
+                    "        repo_name = \"%s\",\n" % ((install.dependency_set + "_download") if install.dependency_set else "<repo name>") +
+                    "        packages = %s,\n" % install.packages +
+                    "        suites = %s,\n" % install.suites +
+                    "    )\n",
+                )
+
             if install.dependency_set:
-                current_mergedusr = dependency_set_mergedusr.get(install.dependency_set, False)
-                dependency_set_mergedusr[install.dependency_set] = current_mergedusr or install.mergedusr
+                install_repos[install.dependency_set] = True
 
-            for dep_constraint in install.packages:
-                constraint = version_constraint.parse_dep(dep_constraint)
-                architectures = constraint["arch"]
-                if not architectures:
-                    # For cases where architecture for the package is not specified we need
-                    # to first find out which source contains the package. in order to do
-                    # that we first need to resolve the package for amd64 architecture.
-                    # Once the repository is found, then resolve the package for all the
-                    # architectures the repository supports.
-                    (package, warning) = resolver.resolve_package(
-                        name = constraint["name"],
-                        version = constraint["version"],
-                        arch = "amd64",
-                        suites = install.suites,
-                    )
-                    if warning:
-                        util.warning(mctx, warning)
+            install_requests.append(struct(
+                repo_name = install.dependency_set,
+                packages = install.packages,
+                suites = install.suites,
+                mergedusr = install.mergedusr,
+                expose_deps = True,
+            ))
 
-                    # If the package is not found then add the package
-                    # to the resolution_queue to let the resolver handle
-                    # the error messages.
-                    if not package:
-                        resolution_queue.append((
-                            install.dependency_set,
-                            constraint["name"],
-                            constraint["version"],
-                            "amd64",
-                            install.suites,
-                            install.mergedusr,
-                            False,
-                        ))
-                        continue
+        for download in mod.tags.download:
+            download_repos[download.repo_name] = True
 
-                    source = sources[package["Dist"]]
-                    architectures = source["architectures"]
+            install_requests.append(struct(
+                repo_name = download.repo_name,
+                packages = download.packages,
+                suites = download.suites,
+                mergedusr = download.mergedusr,
+                expose_deps = False,
+            ))
 
-                for arch in architectures:
+    for repo_name in download_repos:
+        if repo_name in install_repos:
+            fail(
+                "\n\n`apt.download(repo_name = \"{name}\")` collides with ".format(name = repo_name) +
+                "`apt.install(dependency_set = \"{name}\")`.\n\n".format(name = repo_name) +
+                "Both generate the repository `@{name}`. Give the download a different ".format(name = repo_name) +
+                "`repo_name`.\n",
+            )
+
+    for install in install_requests:
+        if install.repo_name:
+            current_mergedusr = dependency_set_mergedusr.get(install.repo_name, False)
+            dependency_set_mergedusr[install.repo_name] = current_mergedusr or install.mergedusr
+
+        for dep_constraint in install.packages:
+            constraint = version_constraint.parse_dep(dep_constraint)
+            architectures = constraint["arch"]
+            if not architectures:
+                # For cases where architecture for the package is not specified we need
+                # to first find out which source contains the package. in order to do
+                # that we first need to resolve the package for amd64 architecture.
+                # Once the repository is found, then resolve the package for all the
+                # architectures the repository supports.
+                (package, warning) = resolver.resolve_package(
+                    name = constraint["name"],
+                    version = constraint["version"],
+                    arch = "amd64",
+                    suites = install.suites,
+                )
+                if warning:
+                    util.warning(mctx, warning)
+
+                # If the package is not found then add the package
+                # to the resolution_queue to let the resolver handle
+                # the error messages.
+                if not package:
                     resolution_queue.append((
-                        install.dependency_set,
+                        install.repo_name,
                         constraint["name"],
                         constraint["version"],
-                        arch,
+                        "amd64",
                         install.suites,
+                        install.expose_deps,
                         install.mergedusr,
                         False,
                     ))
+                    continue
+
+                source = sources[package["Dist"]]
+                architectures = source["architectures"]
+
+            for arch in architectures:
+                resolution_queue.append((
+                    install.repo_name,
+                    constraint["name"],
+                    constraint["version"],
+                    arch,
+                    install.suites,
+                    install.expose_deps,
+                    install.mergedusr,
+                    False,
+                ))
 
     for i in range(0, ITERATION_MAX + 1):
         if not len(resolution_queue):
@@ -397,11 +453,17 @@ def _distroless_extension(mctx):
         if i == ITERATION_MAX:
             fail("apt.install exhausted, please file a bug")
 
-        (dependency_set_name, name, version, arch, suites, mergedusr, is_transitive_dependency) = resolution_queue.pop()
+        (dependency_set_name, name, version, arch, suites, expose_deps, mergedusr, is_transitive_dependency) = resolution_queue.pop()
 
         mctx.report_progress("Resolving %s:%s" % (name, arch))
 
         # TODO: Flattening approach of resolving dependencies has to change.
+        #
+        # The dependency graph is always resolved transitively, even for
+        # `apt.download`. The lockfile and the per-package repositories are shared
+        # by every request across all modules, so the graph has to be complete and
+        # independent of who asked for a package. Whether a package's dependencies
+        # are exposed is decided per repository, further below.
         (package, dependencies, unmet_dependencies, warnings) = resolver.resolve_all(
             name = name,
             version = version,
@@ -467,6 +529,7 @@ def _distroless_extension(mctx):
                     ("=", dep["Version"]),
                     arch,
                     suites,
+                    True,
                     mergedusr,
                     True,
                 ))
@@ -479,6 +542,17 @@ def _distroless_extension(mctx):
             })
             arch_set = dependency_set["sets"].setdefault(arch, {})
             arch_set[pkg_short_key] = package["Version"]
+
+            # Remember whether this repository should expose the package's
+            # dependency closure. A repository only ever mixes the two if the same
+            # package is named twice, in which case exposing the closure wins.
+            root_key = (dependency_set_name, arch, pkg_short_key)
+            root_expose_deps[root_key] = root_expose_deps.get(root_key, False) or expose_deps
+
+    for ((dependency_set_name, arch, pkg_short_key), exposed) in root_expose_deps.items():
+        if exposed:
+            continue
+        dependency_sets[dependency_set_name].setdefault("no_deps", {}).setdefault(arch, []).append(pkg_short_key)
 
     package_templates = []
     for mod in mctx.modules:
@@ -755,7 +829,53 @@ install = tag_class(
         ),
         "dependency_set": attr.string(),
         "suites": attr.string_list(),
-        "include_transitive": attr.bool(default = True),
+        "include_transitive": attr.bool(
+            default = True,
+            doc = """Deprecated and ignored; setting it to `False` is an error.
+
+Use `apt.download` to generate a repository whose package targets carry only
+their own data, without their dependency closure.""",
+        ),
+        "mergedusr": attr.bool(default = False),
+    },
+)
+
+_download_doc = """Generate a repository of packages without their dependency closures.
+
+`apt.download` is `apt.install` minus the dependencies: each package target in
+the generated repository carries that package's own data and nothing else. Use
+it when the dependencies are already satisfied by whatever the package is
+layered onto, such as a base image that already ships libc.
+
+```starlark
+apt.download(
+    repo_name = "tools",
+    packages = ["jq"],
+    suites = ["bookworm"],
+)
+use_repo(apt, "tools")
+```
+
+`@tools//jq` then contains jq's own files, without `libjq1`, `libonig5` or
+`libc6`.
+
+Dependencies are still resolved and recorded in the lockfile, so a package named
+here can also be installed with its full closure by an `apt.install` elsewhere,
+without the two interfering.
+"""
+
+download = tag_class(
+    doc = _download_doc,
+    attrs = {
+        "repo_name": attr.string(
+            mandatory = True,
+            doc = "Name of the repository to generate. Must not collide with an `apt.install` `dependency_set`.",
+        ),
+        "packages": attr.string_list(
+            mandatory = True,
+            allow_empty = False,
+        ),
+        "suites": attr.string_list(),
         "mergedusr": attr.bool(default = False),
     },
 )
@@ -779,7 +899,7 @@ The template is rendered into each architecture subpackage (`//<package>/<arch>/
 Custom templates must define the following public targets so the package root's multi-platform aliases and hub repo targets function correctly:
   * `:data` (alias or target pointing to `{data_targets}`, with `visibility = ["//visibility:public"]`)
   * `:control` (alias or target pointing to `{control_targets}`, with `visibility = ["//visibility:public"]`)
-  * `:{target_name}` (target representing the package for this architecture, with `visibility = ["//visibility:public"]`, referenced by the root package target `//<package>` and hub repo `:packages` target). While the default template uses a `filegroup(srcs = {deps} + [":data"])`, custom templates may use other rules or omit transitive `{deps}` (e.g. for `include_transitive = False`).
+  * `:{target_name}` (target representing the package for this architecture, with `visibility = ["//visibility:public"]`, referenced by the root package target `//<package>` and hub repo `:packages` target). While the default template uses a `filegroup(srcs = {deps} + [":data"])`, custom templates may use other rules or omit transitive `{deps}` (e.g. for packages requested with `apt.download`).
 
 Template Syntax & Rules:
   * Root module references: Because templates render inside external hub repos (`@<depset_name>`), rules or files loaded from the root workspace must use the canonical repository prefix `@@//` (e.g. `load("@@//:custom_rule.bzl", "my_rule")`).
@@ -831,6 +951,7 @@ apt = module_extension(
     implementation = _distroless_extension,
     tag_classes = {
         "install": install,
+        "download": download,
         "sources_list": sources_list,
         "lock": lock,
         "package_template": package_template,

@@ -72,6 +72,7 @@ apt.install(
         "coreutils",
         "dpkg",
         "google-cloud-cli",
+        "jq",
         "libncurses6",
         "ncurses-base",
         "nginx-core",
@@ -95,5 +96,14 @@ apt.package_template(
     packages = ["tzdata"],
     template_file = "//:custom_package.BUILD.tmpl",
 )
+
+# `jq` is also installed above with its full dependency closure. Both requests
+# share the same package repositories and lockfile entries; only `@tools//jq`
+# leaves the dependencies out. See :download_test.
+apt.download(
+    packages = ["jq"],
+    repo_name = "tools",
+    suites = ["bullseye"],
+)
 apt.lock(into = ":bullseye.lock.json")
-use_repo(apt, "bullseye")
+use_repo(apt, "bullseye", "tools")

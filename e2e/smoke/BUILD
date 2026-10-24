@@ -1,5 +1,7 @@
+load("@bazel_lib//lib:params_file.bzl", "params_file")
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
 load("@container_structure_test//:defs.bzl", "container_structure_test")
 load("@rules_distroless//distroless:defs.bzl", "cacerts", "group", "passwd")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
@@ -154,4 +156,57 @@ build_test(
     targets = [
         "@bullseye//tzdata",
     ],
+)
+
+# `apt.download`: `@tools//jq` must contain nothing but jq's own data, none of
+# its dependencies (libjq1, libonig5, ...), even though `@bullseye//jq` installs
+# the very same package with its full closure.
+# Only rootpaths are compared, so nothing needs to be extracted.
+[
+    platform_transition_filegroup(
+        name = name,
+        srcs = [target],
+        target_platform = select({
+            "@platforms//cpu:arm64": ":linux_arm64",
+            "@platforms//cpu:x86_64": ":linux_amd64",
+        }),
+    )
+    for (name, target) in [
+        ("jq_download", "@tools//jq"),
+        ("jq_download_data", "@tools//jq:data"),
+        ("jq_install", "@bullseye//jq"),
+    ]
+]
+
+[
+    params_file(
+        name = name + "_rootpaths",
+        out = name + "_rootpaths.txt",
+        args = ["$(rootpaths :%s)" % name],
+        data = [":" + name],
+    )
+    for name in [
+        "jq_download",
+        "jq_download_data",
+        "jq_install",
+    ]
+]
+
+diff_test(
+    name = "download_test",
+    file1 = ":jq_download_rootpaths",
+    file2 = ":jq_download_data_rootpaths",
+)
+
+# The `apt.install` of the same package is unaffected by the `apt.download`.
+genrule(
+    name = "jq_install_has_deps",
+    srcs = [":jq_install_rootpaths"],
+    outs = ["jq_install_has_deps.txt"],
+    cmd = "grep -c libjq1 $< > $@",
+)
+
+build_test(
+    name = "install_closure_test",
+    targets = [":jq_install_has_deps"],
 )
