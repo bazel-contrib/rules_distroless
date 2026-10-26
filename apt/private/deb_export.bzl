@@ -1,6 +1,6 @@
 "normalization rules"
 
-load("@aspect_bazel_lib//lib:tar.bzl", tar = "tar_lib")
+load("@tar.bzl//tar:tar.bzl", tar = "tar_lib")
 
 TAR_TOOLCHAIN_TYPE = tar.toolchain_type
 
