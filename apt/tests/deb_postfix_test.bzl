@@ -1,5 +1,7 @@
 "tests for deb_postfix"
 
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
 load("//apt/private:deb_postfix.bzl", "deb_postfix")
 load("//distroless/tests:asserts.bzl", "assert_tar_listing")
 
@@ -32,8 +34,8 @@ cd "$$tmpdir"
 
     deb_postfix(
         name = "_deb_postfix_mergedusr_layer",
-        srcs = [":_deb_postfix_mergedusr_data"],
-        outs = ["deb_postfix_layer.tar.gz"],
+        src = ":_deb_postfix_mergedusr_data",
+        out = "deb_postfix_layer.tar.gz",
         mergedusr = True,
     )
 
@@ -76,8 +78,8 @@ cd "$$tmpdir"
 
     deb_postfix(
         name = "_deb_postfix_basic_layer",
-        srcs = [":_deb_postfix_basic_data"],
-        outs = ["deb_postfix_basic.tar.gz"],
+        src = ":_deb_postfix_basic_data",
+        out = "deb_postfix_basic.tar.gz",
     )
 
     assert_tar_listing(
@@ -116,8 +118,8 @@ cd "$$tmpdir"
 
     deb_postfix(
         name = "_deb_postfix_gzip_layer",
-        srcs = [":_deb_postfix_gzip_data"],
-        outs = ["deb_postfix_gzip_normalized.tar.gz"],
+        src = ":_deb_postfix_gzip_data",
+        out = "deb_postfix_gzip_normalized.tar.gz",
     )
 
     assert_tar_listing(
@@ -130,44 +132,62 @@ cd "$$tmpdir"
 """,
     )
 
-    # Test with xz-compressed input
+    diff_test(
+        name = _TEST_SUITE_PREFIX + "gzip_passthrough",
+        file1 = ":_deb_postfix_gzip_data",
+        file2 = ":_deb_postfix_gzip_layer",
+    )
+
+    # The gzip alias on standard input is the reference for the layer bytes:
+    # it omits the source name and timestamp, and preserves the whole tar.
     native.genrule(
-        name = "_deb_postfix_xz_data",
-        outs = ["lib_data.tar.xz"],
-        cmd = """
-#!/usr/bin/env bash
-set -o pipefail -o errexit -o nounset
-
-tmpdir=$$(mktemp -d)
-bsdtar="$$(pwd)/$(BSDTAR_BIN)"
-zstd="$$(pwd)/$(ZSTD_BIN)"
-out="$$(pwd)/$@"
-trap 'rm -rf "$$tmpdir"' EXIT
-
-mkdir -p "$$tmpdir/var/log"
-touch "$$tmpdir/var/log/app.log"
-
-cd "$$tmpdir"
-# Create tar and pipe through xz
-"$$bsdtar" -cf - ./var | xz -z > "$$out"
-""",
-        toolchains = ["@bsd_tar_toolchains//:resolved_toolchain", "@zstd_toolchains//:resolved_toolchain"],
+        name = "_deb_postfix_reference",
+        srcs = [":_deb_postfix_basic_data"],
+        outs = ["reference.tar.gz"],
+        cmd = '(exec -a gzip "$(ZSTD_BIN)" -n) < "$<" > "$@"',
+        toolchains = ["@zstd_toolchains//:resolved_toolchain"],
+    )
+    diff_test(
+        name = _TEST_SUITE_PREFIX + "uncompressed_bytes",
+        file1 = ":_deb_postfix_reference",
+        file2 = ":_deb_postfix_basic_layer",
     )
 
+    for extension, compression in [("xz", "xz"), ("zst", "zstd"), ("lzma", "lzma")]:
+        data = "_deb_postfix_%s_data" % extension
+        layer = "_deb_postfix_%s_layer" % extension
+        native.genrule(
+            name = data,
+            srcs = [":_deb_postfix_basic_data"],
+            outs = ["lib_data.tar.%s" % extension],
+            cmd = '"$(ZSTD_BIN)" --force --format=%s "$<" -o "$@"' % compression,
+            toolchains = ["@zstd_toolchains//:resolved_toolchain"],
+        )
+        deb_postfix(
+            name = layer,
+            src = ":" + data,
+            out = "deb_postfix_%s_normalized.tar.gz" % extension,
+        )
+        diff_test(
+            name = _TEST_SUITE_PREFIX + extension + "_input",
+            file1 = ":_deb_postfix_reference",
+            file2 = ":" + layer,
+        )
+
+    copy_file(
+        name = "_deb_postfix_uncompressed_as_zstd",
+        src = ":_deb_postfix_basic_data",
+        out = "uncompressed_data.tar.zst",
+    )
     deb_postfix(
-        name = "_deb_postfix_xz_layer",
-        srcs = [":_deb_postfix_xz_data"],
-        outs = ["deb_postfix_xz_normalized.tar.gz"],
+        name = "_deb_postfix_uncompressed_as_zstd_layer",
+        src = ":_deb_postfix_uncompressed_as_zstd",
+        out = "uncompressed_as_zstd.tar.gz",
     )
-
-    assert_tar_listing(
-        name = _TEST_SUITE_PREFIX + "xz_input",
-        actual = ":_deb_postfix_xz_layer",
-        expected = """\
-./var/
-./var/log/
-./var/log/app.log
-""",
+    diff_test(
+        name = _TEST_SUITE_PREFIX + "uncompressed_as_zstd",
+        file1 = ":_deb_postfix_reference",
+        file2 = ":_deb_postfix_uncompressed_as_zstd_layer",
     )
 
     # Test with complex directory structure (multiple levels)
@@ -199,8 +219,8 @@ cd "$$tmpdir"
 
     deb_postfix(
         name = "_deb_postfix_complex_layer",
-        srcs = [":_deb_postfix_complex_data"],
-        outs = ["deb_postfix_complex.tar.gz"],
+        src = ":_deb_postfix_complex_data",
+        out = "deb_postfix_complex.tar.gz",
     )
 
     assert_tar_listing(
