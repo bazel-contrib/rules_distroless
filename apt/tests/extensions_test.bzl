@@ -1,7 +1,7 @@
 "unit tests for apt.install mergedusr scoping"
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//apt:extensions.bzl", "compute_package_repo_modes", "filter_package_templates")
+load("//apt:extensions.bzl", "compute_package_repo_modes", "filter_package_templates", "package_purl", "resolve_vendor")
 
 _TEST_SUITE_PREFIX = "extensions/"
 
@@ -86,6 +86,56 @@ def _filter_package_templates_test(ctx):
 
 filter_package_templates_test = unittest.make(_filter_package_templates_test)
 
+def _resolve_vendor_test(ctx):
+    env = unittest.begin(ctx)
+
+    # The vendor is derived from the lowercased, trimmed Release `Origin`.
+    asserts.equals(env, "debian", resolve_vendor("bookworm", "", "Debian", False))
+    asserts.equals(env, "ubuntu", resolve_vendor("noble", "", "Ubuntu", False))
+    asserts.equals(env, "docker", resolve_vendor("bookworm", "", "Docker", False))
+    asserts.equals(env, "cloud-sdk", resolve_vendor("cloud-sdk", "", " cloud-sdk ", False))
+
+    # Whitespace becomes `-`, and official sub-archives map to their distribution.
+    asserts.equals(env, "raspberry-pi-foundation", resolve_vendor("bookworm", "", "Raspberry Pi Foundation", False))
+    asserts.equals(env, "lp-ppa-deadsnakes", resolve_vendor("noble", "", "LP-PPA-deadsnakes", False))
+    asserts.equals(env, "debian", resolve_vendor("bookworm-backports", "", "Debian Backports", False))
+    asserts.equals(env, "debian", resolve_vendor("bookworm-backports", "", "Debian Backports", True))
+
+    # An explicit vendor always wins over the Origin, lowercased as the PURL spec requires.
+    asserts.equals(env, "debian", resolve_vendor("bookworm", "debian", "Docker", False))
+    asserts.equals(env, "debian", resolve_vendor("bookworm", "Debian", "Docker", False))
+    asserts.equals(env, "acme", resolve_vendor("custom", "acme", "", False))
+
+    # Strict mode accepts the known vendors when derived ...
+    asserts.equals(env, "debian", resolve_vendor("bookworm", "", "Debian", True))
+    asserts.equals(env, "ubuntu", resolve_vendor("noble", "", "Ubuntu", True))
+
+    # ... and any explicit vendor, which is the escape hatch for other origins.
+    asserts.equals(env, "docker", resolve_vendor("bookworm", "docker", "Docker", True))
+    asserts.equals(env, "debian", resolve_vendor("bookworm", "debian", "Docker", True))
+
+    return unittest.end(env)
+
+resolve_vendor_test = unittest.make(_resolve_vendor_test)
+
+def _package_purl_test(ctx):
+    env = unittest.begin(ctx)
+
+    # Examples from the purl-spec deb type definition.
+    asserts.equals(env, "pkg:deb/debian/curl@7.50.3-1?arch=i386&distro=jessie", package_purl("debian", "curl", "7.50.3-1", "i386", "jessie"))
+    asserts.equals(env, "pkg:deb/ubuntu/dpkg@1.19.0.4?arch=amd64", package_purl("ubuntu", "dpkg", "1.19.0.4", "amd64"))
+    asserts.equals(env, "pkg:deb/debian/attr@1:2.4.47-2%2Bb1?arch=amd64", package_purl("debian", "attr", "1:2.4.47-2+b1", "amd64"))
+
+    # Sub-suite codenames and derived third-party vendors pass through.
+    asserts.equals(env, "pkg:deb/debian/bash@5.2.15-2?arch=arm64&distro=bookworm-security", package_purl("debian", "bash", "5.2.15-2", "arm64", "bookworm-security"))
+    asserts.equals(env, "pkg:deb/cloud-sdk/kubectl@1.34.1-00?arch=amd64&distro=cloud-sdk", package_purl("cloud-sdk", "kubectl", "1.34.1-00", "amd64", "cloud-sdk"))
+
+    return unittest.end(env)
+
+package_purl_test = unittest.make(_package_purl_test)
+
 def extensions_tests():
     scoped_mergedusr_test(name = _TEST_SUITE_PREFIX + "scoped_mergedusr")
     filter_package_templates_test(name = _TEST_SUITE_PREFIX + "filter_package_templates")
+    resolve_vendor_test(name = _TEST_SUITE_PREFIX + "resolve_vendor")
+    package_purl_test(name = _TEST_SUITE_PREFIX + "package_purl")

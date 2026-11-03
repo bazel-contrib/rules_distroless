@@ -120,6 +120,23 @@ def _parse_release_file(content):
                 hashes[path] = sha256
     return hashes
 
+def _parse_release_fields(content):
+    """Parses the single-line header fields (e.g. `Origin`, `Codename`) from Release/InRelease contents.
+
+    Multi-line fields such as the checksum tables are skipped.
+    """
+    fields = {}
+    for line in content.splitlines():
+        if not line or line.startswith(" ") or line.startswith("\t"):
+            continue
+        if ":" not in line:
+            continue
+        (key, value) = line.split(":", 1)
+        value = value.strip()
+        if value:
+            fields[key.strip()] = value
+    return fields
+
 def _warning(rctx, message):
     rctx.execute([
         "echo",
@@ -160,5 +177,6 @@ util = struct(
     index_fact_key = _index_fact_key,
     prune_uncacheable_facts = _prune_uncacheable_facts,
     parse_release_file = _parse_release_file,
+    parse_release_fields = _parse_release_fields,
     glob_match = _glob_match,
 )

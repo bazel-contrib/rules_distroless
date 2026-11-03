@@ -68,11 +68,15 @@ def _add_package_dependency(lock, package, dependency, arch = None):
 def _has_package(lock, suite, name, version, arch):
     return _make_package_key(suite, name, version, arch) in lock.packages
 
-def _add_source(lock, suite, types, uris, components, architectures, vendor):
+def _add_source(lock, suite, types, uris, components, architectures, vendor = ""):
     existing = lock.sources.get(suite)
     if existing:
-        if existing.get("vendor", vendor) != vendor:
-            fail("suite `%s` cannot use both `%s` and `%s` as its vendor" % (suite, existing["vendor"], vendor))
+        existing_vendor = existing.get("vendor", "")
+        if vendor and existing_vendor and existing_vendor != vendor:
+            fail("suite `%s` cannot use both `%s` and `%s` as its vendor" % (suite, existing_vendor, vendor))
+
+        # An explicit vendor on any of the suite's sources wins over an unset one.
+        vendor = vendor or existing_vendor
 
         architectures = existing["architectures"] + [
             arch

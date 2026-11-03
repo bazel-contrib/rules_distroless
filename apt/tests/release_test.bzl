@@ -101,6 +101,38 @@ SHA512:
 
     return unittest.end(env)
 
+def _parse_release_fields_test(ctx):
+    env = unittest.begin(ctx)
+
+    release_text = """Origin: Debian
+Label: Debian-Security
+Suite: oldstable-security
+Codename: bookworm-security
+Architectures: amd64 arm64
+Components: updates/main
+SHA256:
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 0 updates/main/binary-amd64/Packages
+"""
+
+    fields = util.parse_release_fields(release_text)
+    asserts.equals(env, "Debian", fields.get("Origin"))
+    asserts.equals(env, "Debian-Security", fields.get("Label"))
+    asserts.equals(env, "bookworm-security", fields.get("Codename"))
+    asserts.equals(env, "amd64 arm64", fields.get("Architectures"))
+
+    # Checksum section headers and their indented entries are not header fields.
+    asserts.false(env, "SHA256" in fields)
+    asserts.equals(env, 6, len(fields))
+
+    # Free-form origins of third-party repositories are returned verbatim.
+    third_party = util.parse_release_fields("Origin: microsoft-debian-bookworm-prod bookworm\nSuite: bookworm\n")
+    asserts.equals(env, "microsoft-debian-bookworm-prod bookworm", third_party.get("Origin"))
+
+    # A Release file without Origin yields no entry for it.
+    asserts.false(env, "Origin" in util.parse_release_fields("Suite: custom\n"))
+
+    return unittest.end(env)
+
 def _build_keyring_args_test(ctx):
     env = unittest.begin(ctx)
 
@@ -222,6 +254,7 @@ def _verification_success_test(ctx):
 
 strip_pgp_armor_test = unittest.make(_strip_pgp_armor_test)
 parse_release_file_test = unittest.make(_parse_release_file_test)
+parse_release_fields_test = unittest.make(_parse_release_fields_test)
 build_keyring_args_test = unittest.make(_build_keyring_args_test)
 deb_repository_stores_gpg_keys_test = unittest.make(_deb_repository_stores_gpg_keys_test)
 is_ascii_armored_test = unittest.make(_is_ascii_armored_test)
@@ -231,6 +264,7 @@ verification_success_test = unittest.make(_verification_success_test)
 def release_tests():
     strip_pgp_armor_test(name = _TEST_SUITE_PREFIX + "strip_pgp_armor")
     parse_release_file_test(name = _TEST_SUITE_PREFIX + "parse_release_file")
+    parse_release_fields_test(name = _TEST_SUITE_PREFIX + "parse_release_fields")
     build_keyring_args_test(name = _TEST_SUITE_PREFIX + "build_keyring_args")
     deb_repository_stores_gpg_keys_test(name = _TEST_SUITE_PREFIX + "deb_repository_stores_gpg_keys")
     is_ascii_armored_test(name = _TEST_SUITE_PREFIX + "is_ascii_armored")
