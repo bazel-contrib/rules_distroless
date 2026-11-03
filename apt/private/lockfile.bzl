@@ -68,9 +68,12 @@ def _add_package_dependency(lock, package, dependency, arch = None):
 def _has_package(lock, suite, name, version, arch):
     return _make_package_key(suite, name, version, arch) in lock.packages
 
-def _add_source(lock, suite, types, uris, components, architectures):
+def _add_source(lock, suite, types, uris, components, architectures, vendor):
     existing = lock.sources.get(suite)
     if existing:
+        if existing.get("vendor", vendor) != vendor:
+            fail("suite `%s` cannot use both `%s` and `%s` as its vendor" % (suite, existing["vendor"], vendor))
+
         architectures = existing["architectures"] + [
             arch
             for arch in architectures
@@ -82,6 +85,7 @@ def _add_source(lock, suite, types, uris, components, architectures):
         "uris": uris,
         "components": components,
         "architectures": architectures,
+        "vendor": vendor,
     }
 
 def _create(mctx, lock):

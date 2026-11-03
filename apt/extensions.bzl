@@ -1,6 +1,7 @@
 "apt extensions"
 
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "read_user_netrc", "use_netrc")
+load("@package_metadata//purl:purl.bzl", "purl")
 load("//apt/private:apt_deb_repository.bzl", "deb_repository")
 load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
 load("//apt/private:deb_filemap.bzl", "deb_filemap")
@@ -288,6 +289,9 @@ def _distroless_extension(mctx):
         # otherwise they'll break if the sources_list that the module depends on
         # magically disappears.
         for sl in mod.tags.sources_list:
+            if sl.vendor not in ["debian", "ubuntu"]:
+                fail("apt.sources_list vendor must be either `debian` or `ubuntu`, got `%s`" % sl.vendor)
+
             uris = [uri.removeprefix("mirror+") for uri in sl.uris]
             architectures = sl.architectures
             gpg_keys = list(sl.gpg_keys)
@@ -314,6 +318,7 @@ def _distroless_extension(mctx):
                     types = sl.types,
                     components = sl.components,
                     architectures = architectures,
+                    vendor = sl.vendor,
                 )
 
                 repo.add_source(
@@ -530,6 +535,14 @@ def _distroless_extension(mctx):
     for (package_key, package) in glock.packages().items():
         (suite, name, arch, version) = lockfile.parse_package_key(package_key)
 
+        purl_builder = purl.builder() \
+            .type("deb") \
+            .namespace(sources[suite]["vendor"]) \
+            .name(name) \
+            .version(version) \
+            .add_qualifier("arch", arch) \
+            .build()
+
         # Each package publishes its own file list in a leaf repo to avoid circular deps.
         # Storing these in a file instead of passing filemaps as attributes cuts down lockfile size considerably.
         deb_filemap(
@@ -557,6 +570,7 @@ def _distroless_extension(mctx):
                     for dep in package["depends_on"]
                 ],
                 package_name = package["name"],
+                purl = purl_builder,
             )
 
     if not use_facts:
@@ -744,6 +758,10 @@ sources_list = tag_class(
         "suites": attr.string_list(),
         "types": attr.string_list(),
         "uris": attr.string_list(),
+        "vendor": attr.string(
+            doc = "PURL namespace for packages from this source. Must be `debian` or `ubuntu`.",
+            mandatory = True,
+        ),
     },
 )
 

@@ -15,6 +15,13 @@ load("@rules_cc//cc/private/rules_impl:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_distroless//apt/private:cc_deb_library.bzl", "cc_deb_library")
 load("@bazel_skylib//rules/directory:directory.bzl", "directory")
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
+
+package_metadata(
+    name = "package_metadata",
+    purl = {purl},
+    visibility = ["//visibility:public"],
+)
 
 deb_postfix(
     name = "data",
@@ -22,6 +29,9 @@ deb_postfix(
     outs = ["content.tar.gz"],
     mergedusr = {mergedusr},
     visibility = ["//visibility:public"],
+    package_metadata = [
+        ":package_metadata",
+    ],
 )
 
 filegroup(
@@ -496,6 +506,7 @@ def _deb_import_impl(rctx):
         outs = outs,
         foreign_symlinks = foreign_symlinks,
         symlink_outs = symlinks.keys(),
+        purl = repr(rctx.attr.purl),
     ))
 
     # Bazel < 8.3.0 has no repo_metadata.
@@ -512,5 +523,6 @@ deb_import = repository_rule(
         "mergedusr": attr.bool(),
         "target_name": attr.string(),
         "package_name": attr.string(),
+        "purl": attr.string(),
     },
 )
