@@ -1,0 +1,62 @@
+"""SBOM example.
+
+Every package imported with `apt.install` carries a `package_metadata` (PURL)
+attribute on its `:data` target. The `sbom` aspect walks the dependency graph
+of a package and reports each deb as a component. The `diff_test` checks the
+generated CycloneDX report, and so the PURLs, against a golden file.
+
+    bazel test //sbom:bash_cyclonedx_test
+
+To update the golden file:
+
+    bazel build //sbom:bash_cyclonedx_formatted && cp bazel-bin/sbom/bash_cyclonedx_formatted.json sbom/bash_cyclonedx.golden.json
+"""
+
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@jq.bzl//jq:jq.bzl", "jq")
+load("@supply_chain_tools//sbom:cyclonedx.bzl", "cyclonedx")
+load("@supply_chain_tools//sbom:sbom.bzl", "sbom")
+
+# The apt packages select on the target platform, so pin it to keep the test
+# independent of the host (and the PURL `arch` qualifier stable).
+platform(
+    name = "linux_amd64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+platform_transition_filegroup(
+    name = "bash",
+    srcs = ["@bullseye//bash"],
+    target_platform = ":linux_amd64",
+)
+
+sbom(
+    name = "bash_sbom",
+    # The `bash` filegroup has no metadata of its own; the `package_metadata`
+    # (PURL) lives on each deb's `:data` target, which the filegroup and its
+    # dependencies (e.g. libc6, libtinfo6) pull in as components.
+    require_root_metadata = False,
+    target = ":bash",
+)
+
+cyclonedx(
+    name = "bash_cyclonedx",
+    sbom = ":bash_sbom",
+)
+
+# Pretty-print so the golden file is readable and diffs are line-based.
+jq(
+    name = "bash_cyclonedx_formatted",
+    srcs = [":bash_cyclonedx"],
+    filter = ".",
+)
+
+diff_test(
+    name = "bash_cyclonedx_test",
+    file1 = ":bash_cyclonedx_formatted",
+    file2 = "bash_cyclonedx.golden.json",
+)

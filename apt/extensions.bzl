@@ -315,7 +315,7 @@ def normalize_vendor(origin):
     derived = "-".join(words)
     return ORIGIN_ALIASES.get(derived, derived)
 
-def package_purl(vendor, name, version, arch, distro = ""):
+def package_purl(vendor, name, version, arch, distro = "", sha256 = "", file_name = ""):
     """Builds the PURL of a Debian package, e.g. `pkg:deb/debian/curl@7.50.3-1?arch=i386&distro=jessie`.
 
     Args:
@@ -324,6 +324,8 @@ def package_purl(vendor, name, version, arch, distro = ""):
         version: the package version.
         arch: the package architecture.
         distro: the distribution codename, added as the `distro` qualifier when non-empty.
+        sha256: the hex SHA-256 of the `.deb`, added as the `checksum` qualifier (`sha256:<hex>`) when non-empty.
+        file_name: the file name of the `.deb`, added as the `file_name` qualifier when non-empty.
 
     Returns:
         The PURL string.
@@ -334,6 +336,10 @@ def package_purl(vendor, name, version, arch, distro = ""):
         .name(name) \
         .version(version) \
         .add_qualifier("arch", arch)
+    if sha256:
+        builder = builder.add_qualifier("checksum", "sha256:" + sha256)
+    if file_name:
+        builder = builder.add_qualifier("file_name", file_name)
     if distro:
         builder = builder.add_qualifier("distro", distro)
     return builder.build()
@@ -669,6 +675,8 @@ def _distroless_extension(mctx):
             version = version,
             arch = arch,
             distro = sources[suite].get("distro", ""),
+            sha256 = package["sha256"],
+            file_name = package["urls"][0].split("/")[-1],
         )
 
         # Each package publishes its own file list in a leaf repo to avoid circular deps.

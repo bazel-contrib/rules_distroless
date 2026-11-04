@@ -130,6 +130,9 @@ def _package_purl_test(ctx):
     asserts.equals(env, "pkg:deb/debian/bash@5.2.15-2?arch=arm64&distro=bookworm-security", package_purl("debian", "bash", "5.2.15-2", "arm64", "bookworm-security"))
     asserts.equals(env, "pkg:deb/cloud-sdk/kubectl@1.34.1-00?arch=amd64&distro=cloud-sdk", package_purl("cloud-sdk", "kubectl", "1.34.1-00", "amd64", "cloud-sdk"))
 
+    # Checksum and file name qualifiers.
+    asserts.equals(env, "pkg:deb/debian/adduser@3.152?arch=all&checksum=sha256:abc&distro=trixie&file_name=adduser_3.152_all.deb", package_purl("debian", "adduser", "3.152", "all", "trixie", "abc", "adduser_3.152_all.deb"))
+
     return unittest.end(env)
 
 package_purl_test = unittest.make(_package_purl_test)
