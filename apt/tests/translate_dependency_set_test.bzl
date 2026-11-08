@@ -131,6 +131,9 @@ def _check_template_variable_collision_test(ctx):
         "another_var": "123",
     }))
 
+    # New optional placeholders must not reject existing custom variables.
+    asserts.equals(env, None, check_template_variable_collision({"control_deps": "custom"}))
+
     # Collisions with reserved built-in keys
     asserts.equals(env, "name", check_template_variable_collision({
         "name": "override",

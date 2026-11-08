@@ -781,6 +781,11 @@ Custom templates must define the following public targets so the package root's 
   * `:control` (alias or target pointing to `{control_targets}`, with `visibility = ["//visibility:public"]`)
   * `:{target_name}` (target representing the package for this architecture, with `visibility = ["//visibility:public"]`, referenced by the root package target `//<package>` and hub repo `:packages` target). While the default template uses a `filegroup(srcs = {deps} + [":data"])`, custom templates may use other rules or omit transitive `{deps}` (e.g. for `include_transitive = False`).
 
+The generated `dpkg_status` includes the root `:control` targets and metadata for
+unmodified dependency archives present in `:packages`. If a custom rule repacks
+dependency archives into new outputs, its `:control` must include their metadata
+explicitly; `{control_deps}` provides the controls corresponding to `{deps}`.
+
 Template Syntax & Rules:
   * Root module references: Because templates render inside external hub repos (`@<depset_name>`), rules or files loaded from the root workspace must use the canonical repository prefix `@@//` (e.g. `load("@@//:custom_rule.bzl", "my_rule")`).
   * Brace escaping: Because Python-style `str.format()` is used, literal braces in templates (such as `{}` in comments or Starlark dictionaries) must be escaped by doubling them as `{{` and `}}`.
@@ -792,7 +797,8 @@ Built-in variables available for formatting:
   * `{version}`: Package version (raw string).
   * `{suite}`: Distribution suite (e.g. 'bookworm') (raw string).
   * `{arch}`: Package architecture (raw string).
-  * `{deps}`: List of direct dependencies formatted as labels.
+  * `{deps}`: List of dependency data archives formatted as labels.
+  * `{control_deps}`: Corresponding dependency control archives, in the same order.
   * `{data_targets}`: Label pointing to the package data archive (quoted).
   * `{control_targets}`: Label pointing to the package control archive (quoted).
   * `{src}`: Label pointing to the package data archive (quoted, alias for `{data_targets}`).

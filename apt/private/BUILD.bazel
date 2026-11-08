@@ -100,6 +100,7 @@ bzl_library(
     deps = [
         ":deb_postfix",
         ":lockfile",
+        ":package_controls",
         ":starlark_codegen_utils",
         ":util",
         "//apt:defs",
@@ -156,5 +157,11 @@ bzl_library(
 bzl_library(
     name = "util",
     srcs = ["util.bzl"],
+    visibility = ["//apt:__subpackages__"],
+)
+
+bzl_library(
+    name = "package_controls",
+    srcs = ["package_controls.bzl"],
     visibility = ["//apt:__subpackages__"],
 )

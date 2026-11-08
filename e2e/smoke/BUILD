@@ -1,6 +1,7 @@
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@container_structure_test//:defs.bzl", "container_structure_test")
+load("@rules_distroless//apt/tests:status_tests.bzl", "status_tests")
 load("@rules_distroless//distroless:defs.bzl", "cacerts", "group", "passwd")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@tar.bzl", "tar")
@@ -16,6 +17,8 @@ COMPATIBLE_WITH = select({
 }) + [
     "@platforms//os:linux",
 ]
+
+status_tests(COMPATIBLE_WITH)
 
 passwd(
     name = "passwd",
