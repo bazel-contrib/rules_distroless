@@ -18,8 +18,8 @@ load("@bazel_skylib//rules/directory:directory.bzl", "directory")
 
 deb_postfix(
     name = "data",
-    srcs = glob(["data.tar*"]),
-    outs = ["content.tar.gz"],
+    src = {data_tar},
+    out = "content.tar.gz",
     mergedusr = {mergedusr},
     visibility = ["//visibility:public"],
 )
@@ -39,7 +39,7 @@ filegroup(
 
 deb_export(
     name = "export",
-    srcs = glob(["data.tar*"]),
+    srcs = [{data_tar}],
     foreign_symlinks = {foreign_symlinks},
     symlink_outs = {symlink_outs},
     outs = {outs},
@@ -185,8 +185,7 @@ def _remap_linkopts(rctx, extract_dir, so_regular_files, self_files, depends_fil
 
     return result.linkopts
 
-def _discover_contents(rctx, depends_on, depends_file_map, target_name, mergedusr = False):
-    archive = data_archive(rctx)
+def _discover_contents(rctx, archive, depends_on, depends_file_map, target_name, mergedusr = False):
     tar = host_bsdtar(rctx)
     result = rctx.execute([tar, "-tvf", archive])
     if result.return_code:
@@ -468,9 +467,13 @@ def _deb_import_impl(rctx):
             if file not in provided_by:
                 provided_by[file] = dep_repo
 
+    # A .deb contains exactly one data.tar member, possibly compressed.
+    archive = data_archive(rctx)
+
     # TODO: only do this if package is -dev or dependent of a -dev pkg.
     cc_import_targets, outs, symlinks = _discover_contents(
         rctx,
+        archive,
         rctx.attr.depends_on,
         provided_by,
         rctx.attr.package_name.removesuffix("-dev"),
@@ -489,6 +492,7 @@ def _deb_import_impl(rctx):
     }
 
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
+        data_tar = repr(archive.basename),
         mergedusr = rctx.attr.mergedusr,
         depends_on = ["@" + util.package_repo_name(dep_key, mergedusr = rctx.attr.mergedusr) + "//:data" for dep_key in rctx.attr.depends_on],
         target_name = rctx.attr.target_name,
