@@ -1,4 +1,4 @@
-"""Inspect Debian data archives with tar.bzl's host toolchain binary."""
+"""Inspect Debian package archives with tar.bzl's host toolchain binary."""
 
 load("@bazel_lib//lib:repo_utils.bzl", "repo_utils")
 
@@ -9,8 +9,14 @@ def host_bsdtar(rctx):
     binary = "tar.exe" if platform.startswith("windows_") else "tar"
     return rctx.path(Label("@bsd_tar_toolchains_{}//:{}".format(platform, binary)))
 
-def data_archive(rctx, directory = "."):
-    archives = [path for path in rctx.path(directory).readdir() if path.basename.startswith("data.tar")]
+def _member_archive(rctx, member, directory):
+    archives = [path for path in rctx.path(directory).readdir() if path.basename.startswith(member + ".tar")]
     if len(archives) != 1:
-        fail("expected one data archive, found: %s" % archives)
+        fail("expected one %s archive, found: %s" % (member, archives))
     return archives[0]
+
+def data_archive(rctx, directory = "."):
+    return _member_archive(rctx, "data", directory)
+
+def control_archive(rctx, directory = "."):
+    return _member_archive(rctx, "control", directory)
