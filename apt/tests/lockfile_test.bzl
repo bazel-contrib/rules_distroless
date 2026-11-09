@@ -62,9 +62,75 @@ def _add_source_merges_architectures_test(ctx):
 
 add_source_merges_architectures_test = unittest.make(_add_source_merges_architectures_test)
 
+# `vendor` (the PURL namespace) may be set on any of the `apt.sources_list`
+# entries contributing to a suite, or on none of them when it is derived from
+# the Release `Origin` later. Merging must keep an explicit vendor and never
+# let an unset one clobber it.
+def _add_source_merges_vendor_test(ctx):
+    env = unittest.begin(ctx)
+
+    lock = lockfile.empty(struct())
+
+    lock.add_source(
+        suite = "bookworm",
+        types = ["deb"],
+        uris = ["https://deb.debian.org/debian"],
+        components = ["main"],
+        architectures = ["amd64"],
+    )
+    asserts.equals(env, "", lock.sources()["bookworm"]["vendor"])
+
+    lock.add_source(
+        suite = "bookworm",
+        types = ["deb"],
+        uris = ["https://deb.debian.org/debian"],
+        components = ["main"],
+        architectures = ["arm64"],
+        vendor = "debian",
+    )
+    asserts.equals(env, "debian", lock.sources()["bookworm"]["vendor"])
+
+    # An unset vendor on a later source keeps the explicit one.
+    lock.add_source(
+        suite = "bookworm",
+        types = ["deb"],
+        uris = ["https://deb.debian.org/debian"],
+        components = ["contrib"],
+        architectures = ["amd64"],
+    )
+    asserts.equals(env, "debian", lock.sources()["bookworm"]["vendor"])
+
+    # Repeating the same explicit vendor is accepted.
+    lock.add_source(
+        suite = "bookworm",
+        types = ["deb"],
+        uris = ["https://deb.debian.org/debian"],
+        components = ["main"],
+        architectures = ["amd64"],
+        vendor = "debian",
+    )
+    asserts.equals(env, "debian", lock.sources()["bookworm"]["vendor"])
+
+    # Other suites are unaffected.
+    lock.add_source(
+        suite = "noble",
+        types = ["deb"],
+        uris = ["https://archive.ubuntu.com/ubuntu"],
+        components = ["main"],
+        architectures = ["amd64"],
+        vendor = "ubuntu",
+    )
+    asserts.equals(env, "ubuntu", lock.sources()["noble"]["vendor"])
+    asserts.equals(env, "debian", lock.sources()["bookworm"]["vendor"])
+
+    return unittest.end(env)
+
+add_source_merges_vendor_test = unittest.make(_add_source_merges_vendor_test)
+
 def lockfile_tests():
     package_source_urls_test(name = _TEST_SUITE_PREFIX + "package_source_urls")
     add_source_merges_architectures_test(name = _TEST_SUITE_PREFIX + "add_source_merges_architectures")
+    add_source_merges_vendor_test(name = _TEST_SUITE_PREFIX + "add_source_merges_vendor")
 
 def _package_source_urls_test(ctx):
     env = unittest.begin(ctx)

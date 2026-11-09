@@ -231,9 +231,32 @@ def _download_and_verify_release(mctx, urls, dist, gpg_keys):
         "\n".join(errors),
     ))
 
+def _download_release_unverified(mctx, urls, dist):
+    """Downloads InRelease (or Release) without signature verification.
+
+    Used to read repository metadata (e.g. `Origin`) for sources that opted out
+    of signature verification with `allow_unsigned`. Returns the Release contents
+    with any clearsign armor stripped, or None if no Release file could be
+    downloaded from any of the URLs.
+    """
+    for (url_idx, url) in enumerate(urls):
+        for name in ["InRelease", "Release"]:
+            release_url = "{}/dists/{}/{}".format(url, dist, name)
+            release_path = "release-unverified/{}/{}/{}".format(dist, url_idx, name)
+            mctx.report_progress("Downloading {} from {}".format(name, release_url))
+            download = mctx.download(
+                url = release_url,
+                output = release_path,
+                allow_fail = True,
+            )
+            if download.success:
+                return _strip_pgp_clearsign_armor(mctx.read(release_path))
+    return None
+
 pgp = struct(
     build_keyring_args = _build_keyring_args,
     download_and_verify_release = _download_and_verify_release,
+    download_release_unverified = _download_release_unverified,
     is_ascii_armored = _is_ascii_armored,
     is_verification_success = _is_verification_success,
     strip_clearsign_armor = _strip_pgp_clearsign_armor,

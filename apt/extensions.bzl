@@ -1,6 +1,7 @@
 "apt extensions"
 
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "read_user_netrc", "use_netrc")
+load("@package_metadata//purl:purl.bzl", "purl")
 load("//apt/private:apt_deb_repository.bzl", "deb_repository")
 load("//apt/private:apt_dep_resolver.bzl", "dependency_resolver")
 load("//apt/private:deb_filemap.bzl", "deb_filemap")
@@ -15,6 +16,15 @@ load("//apt/private:version_constraint.bzl", "version_constraint")
 ALL_SUPPORTED_ARCHES = ["armel", "armhf", "arm64", "i386", "amd64", "mips64el", "ppc64el", "x390x"]
 
 ITERATION_MAX = 2147483646
+
+# PURL namespaces (vendors) accepted for derived vendors under `apt.settings(strict_vendor = True)`.
+KNOWN_VENDORS = ["debian", "ubuntu"]
+
+# Normalized Release `Origin` values (see `normalize_vendor`) of official
+# sub-archives whose packages belong to a distribution with a different `Origin`.
+ORIGIN_ALIASES = {
+    "debian-backports": "debian",
+}
 
 def _get_auth(mctx, urls):
     """Given the list of URLs obtain the correct auth dict."""
@@ -138,22 +148,47 @@ def _resolve_downloads(mctx, tokens):
 def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
     """Fetch all package indices in parallel, then parse them.
 
-    Returns the set (as a dict) of fact keys that belong to the current sources,
-    so the caller can prune stale facts left behind by previous URLs.
+    Returns a tuple `(used_keys, releases)`: the set (as a dict) of fact keys
+    that belong to the current sources, so the caller can prune stale facts
+    left behind by previous URLs, and per suite the `origin` and `codename`
+    of its Release file (empty strings when the repository does not serve them).
     """
     pending = []
     seen = {}
     used_keys = {}
+    releases = {}
     verified_releases = {}
+    unverified_releases = {}
 
-    def get_release_hashes(dist, urls, gpg_keys):
+    def get_verified_release(dist, urls, gpg_keys):
+        """Returns `(hashes, fields)` parsed from the GPG-verified Release file."""
         cache_key = (dist, tuple(urls), tuple([str(k) for k in gpg_keys]))
         if cache_key in verified_releases:
             return verified_releases[cache_key]
         release_content = pgp.download_and_verify_release(mctx, urls, dist, gpg_keys)
-        hashes = util.parse_release_file(release_content)
-        verified_releases[cache_key] = hashes
-        return hashes
+        release = (util.parse_release_file(release_content), util.parse_release_fields(release_content))
+        verified_releases[cache_key] = release
+        return release
+
+    def get_unverified_release_fields(dist, urls):
+        """Returns the header fields of the unverified Release file, or `{}` if none is served."""
+        cache_key = (dist, tuple(urls))
+        if cache_key in unverified_releases:
+            return unverified_releases[cache_key]
+        release_content = pgp.download_release_unverified(mctx, urls, dist)
+        fields = util.parse_release_fields(release_content) if release_content != None else {}
+        unverified_releases[cache_key] = fields
+        return fields
+
+    def record_release(dist, fields):
+        release = releases.setdefault(dist, {"origin": "", "codename": ""})
+        origin = fields.get("Origin", "")
+        if origin and release["origin"] and origin != release["origin"]:
+            fail("suite `%s` is served with conflicting Release `Origin` values: `%s` and `%s`" % (dist, release["origin"], origin))
+        if origin:
+            release["origin"] = origin
+        if not release["codename"]:
+            release["codename"] = fields.get("Codename", "")
 
     for source_key, source in repo.sources().items():
         (urls, dist, component, architecture, gpg_keys) = source
@@ -181,7 +216,10 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
 
         hashes = None
         if gpg_keys:
-            hashes = get_release_hashes(dist, urls, gpg_keys)
+            (hashes, fields) = get_verified_release(dist, urls, gpg_keys)
+        else:
+            fields = get_unverified_release_fields(dist, urls)
+        record_release(dist, fields)
 
         # Pass 1: Initiate all downloads with block=False
         # For snapshot suites, integrity hashes from facts enable instant cache hits.
@@ -214,7 +252,7 @@ def _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats):
         mctx.report_progress("parsing Package indices: {}/{} for {}".format(dist, comp, arch))
         repo.parse_package_index(mctx.read(output), urls, dist)
 
-    return used_keys
+    return (used_keys, releases)
 
 def compute_package_repo_modes(packages, roots_by_mode):
     modes = {}
@@ -260,6 +298,88 @@ def filter_package_templates(package_templates, depset_name):
         if not pt.get("dependency_sets") or depset_name in pt["dependency_sets"]
     ]
 
+def normalize_vendor(origin):
+    """Normalizes a Release `Origin` into a PURL namespace (vendor).
+
+    The value is lowercased, runs of whitespace become a single `-`, and the
+    origins of official sub-archives listed in `ORIGIN_ALIASES` are mapped to
+    their distribution (e.g. `Debian Backports` -> `debian`).
+
+    Args:
+        origin: the `Origin` field of a Release file.
+
+    Returns:
+        The normalized vendor, or an empty string if `origin` is blank.
+    """
+    words = [w for w in origin.lower().replace("\t", " ").split(" ") if w]
+    derived = "-".join(words)
+    return ORIGIN_ALIASES.get(derived, derived)
+
+def package_purl(vendor, name, version, arch, distro = "", sha256 = "", file_name = ""):
+    """Builds the PURL of a Debian package, e.g. `pkg:deb/debian/curl@7.50.3-1?arch=i386&distro=jessie`.
+
+    Args:
+        vendor: the PURL namespace, see `resolve_vendor`.
+        name: the binary package name.
+        version: the package version.
+        arch: the package architecture.
+        distro: the distribution codename, added as the `distro` qualifier when non-empty.
+        sha256: the hex SHA-256 of the `.deb`, added as the `checksum` qualifier (`sha256:<hex>`) when non-empty.
+        file_name: the file name of the `.deb`, added as the `file_name` qualifier when non-empty.
+
+    Returns:
+        The PURL string.
+    """
+    builder = purl.builder() \
+        .type("deb") \
+        .namespace(vendor) \
+        .name(name) \
+        .version(version) \
+        .add_qualifier("arch", arch)
+    if sha256:
+        builder = builder.add_qualifier("checksum", "sha256:" + sha256)
+    if file_name:
+        builder = builder.add_qualifier("file_name", file_name)
+    if distro:
+        builder = builder.add_qualifier("distro", distro)
+    return builder.build()
+
+def resolve_vendor(suite, vendor, origin, strict):
+    """Resolves the PURL namespace (vendor) for the packages of a suite.
+
+    An explicit `vendor` on `apt.sources_list` always wins (lowercased, as the
+    PURL spec requires). Otherwise the vendor is derived from the `Origin` field
+    of the suite's Release file, see `normalize_vendor`. With
+    `apt.settings(strict_vendor = True)`, a derived vendor must be one of
+    `KNOWN_VENDORS`; any other `Origin` requires an explicit `vendor`.
+
+    Args:
+        suite: name of the suite, used in error messages.
+        vendor: the explicit `vendor` from `apt.sources_list`, or empty.
+        origin: the `Origin` field of the suite's Release file, or empty.
+        strict: whether `apt.settings(strict_vendor = True)` is set.
+
+    Returns:
+        The vendor to use as the PURL namespace.
+    """
+    if vendor:
+        return vendor.lower()
+
+    derived = normalize_vendor(origin)
+    if not derived:
+        fail(
+            "Could not determine the PURL vendor for suite `{}`: its Release/InRelease file has no `Origin` field (or could not be downloaded). ".format(suite) +
+            "Set `vendor` explicitly on the matching `apt.sources_list`.",
+        )
+
+    if strict and derived not in KNOWN_VENDORS:
+        fail(
+            "The Release `Origin` of suite `{}` is `{}`, which is not one of {} and `apt.settings(strict_vendor = True)` is set. ".format(suite, origin, KNOWN_VENDORS) +
+            "Set `vendor` explicitly on the matching `apt.sources_list`.",
+        )
+
+    return derived
+
 def _distroless_extension(mctx):
     # Detect facts API availability
     use_facts = hasattr(mctx, "facts")
@@ -282,6 +402,16 @@ def _distroless_extension(mctx):
 
     repo = deb_repository.new()
     resolver = dependency_resolver.new(repo)
+
+    strict_vendor = False
+    for mod in mctx.modules:
+        if not mod.tags.settings:
+            continue
+        if not mod.is_root:
+            fail("apt.settings can only be declared by the root module, but was declared in module '{}'.".format(mod.name))
+        if len(mod.tags.settings) > 1:
+            fail("There can only be one apt.settings per module.")
+        strict_vendor = mod.tags.settings[0].strict_vendor
 
     for mod in mctx.modules:
         # TODO: also enfore that every module explicitly lists their sources_list
@@ -314,6 +444,7 @@ def _distroless_extension(mctx):
                     types = sl.types,
                     components = sl.components,
                     architectures = architectures,
+                    vendor = sl.vendor,
                 )
 
                 repo.add_source(
@@ -325,9 +456,17 @@ def _distroless_extension(mctx):
 
     # Fetch all sources_list in parallel and parse them. `used_keys` is the set
     # of fact keys for the current sources, used below to prune stale facts.
-    used_keys = _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats)
+    (used_keys, releases) = _fetch_and_parse_sources(mctx, repo, glock, snapshot_indices, formats)
 
     sources = glock.sources()
+
+    # Resolve the PURL namespace (vendor) of each suite from its explicit
+    # `vendor` or from the `Origin` of its Release file, and the PURL `distro`
+    # qualifier from the Release `Codename` (falling back to the suite name).
+    for suite in sources.keys():
+        release = releases.get(suite, {})
+        sources[suite]["vendor"] = resolve_vendor(suite, sources[suite].get("vendor", ""), release.get("origin", ""), strict_vendor)
+        sources[suite]["distro"] = release.get("codename", "") or suite
     dependency_sets = glock.dependency_sets()
 
     resolution_queue = []
@@ -530,6 +669,16 @@ def _distroless_extension(mctx):
     for (package_key, package) in glock.packages().items():
         (suite, name, arch, version) = lockfile.parse_package_key(package_key)
 
+        package_purl_str = package_purl(
+            vendor = sources[suite]["vendor"],
+            name = name,
+            version = version,
+            arch = arch,
+            distro = sources[suite].get("distro", ""),
+            sha256 = package["sha256"],
+            file_name = package["urls"][0].split("/")[-1],
+        )
+
         # Each package publishes its own file list in a leaf repo to avoid circular deps.
         # Storing these in a file instead of passing filemaps as attributes cuts down lockfile size considerably.
         deb_filemap(
@@ -557,6 +706,7 @@ def _distroless_extension(mctx):
                     for dep in package["depends_on"]
                 ],
                 package_name = package["name"],
+                purl = package_purl_str,
             )
 
     if not use_facts:
@@ -724,6 +874,35 @@ apt.sources_list(
     uris = ["https://internal.repo.corp.example.com"],
 )
 ```
+
+### Package URLs (PURLs)
+
+Every package repository exposes a `:package_metadata` target carrying the
+package's [PURL](https://github.com/package-url/purl-spec), e.g.
+`pkg:deb/debian/bash@5.1-2?arch=amd64&distro=bookworm`.
+
+The PURL namespace (the vendor) is derived from the `Origin` field of the
+suite's `Release`/`InRelease` file, lowercased and with whitespace replaced by
+`-`: `Debian` for Debian mirrors and snapshots, `Ubuntu` for Ubuntu. Official
+sub-archives whose `Origin` differs from their distribution are mapped back to
+it (`Debian Backports` becomes `debian`). The `distro` qualifier is the Release
+`Codename` (e.g. `bookworm`, `noble`, `bookworm-security`), falling back to the
+suite name. For sources with `allow_unsigned = True`, the `Release` file is
+downloaded without verification for this purpose.
+
+Set `vendor` on `apt.sources_list` to override the derived vendor; this is
+required for repositories that do not serve an `Origin` field. SBOM tools
+conventionally use the distribution a package belongs to as the vendor, so for
+third-party repositories layered on a distribution (Docker, PPAs, ...) the base
+distribution (`debian`, `ubuntu`) is usually the right explicit value.
+
+The root module can require derived vendors to be `debian` or `ubuntu`, so that
+third-party repositories (whose `Origin` is their own name) must declare their
+vendor explicitly:
+
+```starlark
+apt.settings(strict_vendor = True)
+```
 """
 
 sources_list = tag_class(
@@ -744,6 +923,12 @@ sources_list = tag_class(
         "suites": attr.string_list(),
         "types": attr.string_list(),
         "uris": attr.string_list(),
+        "vendor": attr.string(
+            doc = """PURL namespace (vendor) for packages from this source, e.g. `debian` or `ubuntu`.
+
+When unset, the vendor is derived from the `Origin` field of the suite's `Release`/`InRelease` file (lowercased, whitespace replaced by `-`).
+See `apt.settings(strict_vendor = True)` to restrict derived vendors to `debian` and `ubuntu`.""",
+        ),
     },
 )
 
@@ -764,6 +949,17 @@ lock = tag_class(
     attrs = {
         "into": attr.label(
             mandatory = True,
+        ),
+    },
+)
+
+settings = tag_class(
+    doc = """Global settings for the `apt` extension. This tag can only be declared by the root module.""",
+    attrs = {
+        "strict_vendor": attr.bool(
+            default = False,
+            doc = """When `True`, a PURL vendor derived from a Release `Origin` must be `debian` or `ubuntu`;
+sources with any other `Origin` must set `vendor` explicitly on their `apt.sources_list`.""",
         ),
     },
 )
@@ -834,5 +1030,6 @@ apt = module_extension(
         "sources_list": sources_list,
         "lock": lock,
         "package_template": package_template,
+        "settings": settings,
     },
 )
