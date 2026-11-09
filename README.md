@@ -83,6 +83,7 @@ The [examples](/examples) demonstrate how to accomplish typical tasks such as
 
 - [groupadd](/examples/group)
 - [passwd](/examples/passwd)
+- [add users and groups while preserving a base image](/distroless/tests/accounts)
 - [useradd --home](/examples/home)
 - [update-ca-certificates](/examples/cacerts)
 - [keytool](/examples/java_keystore)

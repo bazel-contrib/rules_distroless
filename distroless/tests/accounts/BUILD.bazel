@@ -1,0 +1,100 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("//distroless:defs.bzl", "accounts")
+load(":fixture.bzl", "account_base_fixture")
+
+package(default_visibility = ["//visibility:public"])
+
+config_setting(
+    name = "arm64",
+    constraint_values = ["@platforms//cpu:arm64"],
+)
+
+_ARCH = select({
+    ":arm64": "arm64",
+    "//conditions:default": "amd64",
+})
+
+py_test(
+    name = "accounts_test",
+    srcs = [
+        "accounts_test.py",
+        "fixture.py",
+    ],
+    deps = ["//distroless/private:accounts_lib"],
+)
+
+py_binary(
+    name = "fixture",
+    srcs = ["fixture.py"],
+)
+
+[
+    account_base_fixture(
+        name = prefix + "base",
+        architecture = _ARCH,
+        compression = compression,
+    )
+    for prefix, compression in [
+        ("", "none"),
+        ("gzip_", "gzip"),
+        ("xz_", "xz"),
+        ("zstd_", "zstd"),
+    ]
+]
+
+[
+    accounts(
+        name = prefix + "accounts",
+        testonly = True,
+        architecture = _ARCH,
+        base = ":" + prefix + "base",
+        groups = [
+            {
+                "name": "redis",
+                "password": "x",
+                "gid": 101,
+            },
+            {
+                "name": "_ssh",
+                "password": "x",
+                "gid": 104,
+            },
+        ],
+        users = [{
+            "username": "redis",
+            "password": "x",
+            "uid": 100,
+            "gid": 101,
+            "home": "/var/lib/redis",
+            "shell": "/usr/sbin/nologin",
+        }],
+    )
+    for prefix in [
+        "",
+        "gzip_",
+        "xz_",
+        "zstd_",
+    ]
+]
+
+[
+    py_test(
+        name = prefix + "account_layer_test",
+        srcs = ["account_layer_test.py"],
+        args = [
+            "$(location :" + prefix + "accounts)",
+            "$(location :" + prefix + "accounts.receipt)",
+        ],
+        data = [
+            ":" + prefix + "accounts",
+            ":" + prefix + "accounts.receipt",
+        ],
+        main = "account_layer_test.py",
+    )
+    for prefix in [
+        "",
+        "gzip_",
+        "xz_",
+        "zstd_",
+    ]
+]

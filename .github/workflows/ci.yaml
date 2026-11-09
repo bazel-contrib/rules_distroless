@@ -9,6 +9,11 @@ on:
     branches: [main]
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      accounts_only:
+        description: Run only the native base-account tests
+        type: boolean
+        default: false
 
 concurrency:
   # Cancel previous actions from the same PR: https://stackoverflow.com/a/72408109
@@ -17,6 +22,7 @@ concurrency:
 
 jobs:
   test:
+    if: ${{ !inputs.accounts_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -61,16 +67,89 @@ jobs:
           if-no-files-found: ignore
           retention-days: 5
 
+  accounts:
+    name: Base accounts (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: AMD64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: ARM64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      USE_BAZEL_VERSION: 8.5.1
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: bazel-contrib/setup-bazel@0.19.0
+      - name: Verify native execution and test base-account preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == "$EXPECTED_MACHINE" ]]
+          mkdir -p account-evidence
+          uname -m > account-evidence/machine.txt
+          git rev-parse HEAD > account-evidence/source-commit.txt
+          bazel test --lockfile_mode=update --test_output=errors --nocache_test_results \
+            --build_event_json_file=account-evidence/test-events.json \
+            //distroless/tests/accounts:accounts_test \
+            //distroless/tests/accounts:account_layer_test \
+            //distroless/tests/accounts:gzip_account_layer_test \
+            //distroless/tests/accounts:xz_account_layer_test \
+            //distroless/tests/accounts:zstd_account_layer_test \
+            2>&1 | tee account-evidence/test.log
+      - name: Collect account validation evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p account-evidence
+          # Keep test results without Bazel's inherited command-line environment.
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+
+          path = Path("account-evidence/test-events.json")
+          if path.exists():
+              records = []
+              for line in path.read_text().splitlines():
+                  event = json.loads(line)
+                  if any(key in event for key in ("testResult", "testSummary", "finished")):
+                      records.append({key: event[key] for key in ("id", "testResult", "testSummary", "finished") if key in event})
+              path.write_text("".join(json.dumps(event) + "\n" for event in records))
+          PYTHON
+          if [[ -f MODULE.bazel.lock ]]; then cp MODULE.bazel.lock account-evidence/; fi
+          if [[ -d bazel-testlogs/distroless/tests/accounts ]]; then
+            cp -aL bazel-testlogs/distroless/tests/accounts account-evidence/testlogs
+          fi
+          tar -czf account-evidence.tar.gz account-evidence
+      - name: Upload account validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: base-accounts-${{ matrix.arch }}-${{ github.sha }}
+          path: account-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   # Single job to use as a required status check, since the matrix job names
   # above vary and can't be pinned individually in branch protection rules.
   ci:
     if: ${{ !cancelled() }}
-    needs: [test]
+    needs: [test, accounts]
     runs-on: ubuntu-latest
     steps:
       - name: Check matrix job results
         run: |
-          if [[ "${{ needs.test.result }}" != "success" ]]; then
-            echo "One or more matrix jobs failed: ${{ needs.test.result }}"
+          test_result="${{ needs.test.result }}"
+          if [[ "${{ inputs.accounts_only }}" == "true" && "$test_result" == "skipped" ]]; then
+            test_result=success
+          fi
+          if [[ "$test_result" != "success" || "${{ needs.accounts.result }}" != "success" ]]; then
+            echo "Matrix results: tests=${{ needs.test.result }}, accounts=${{ needs.accounts.result }}"
             exit 1
           fi
