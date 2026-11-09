@@ -45,6 +45,37 @@ def _no_mixed_architectures_test(ctx):
 
 no_mixed_architectures_test = unittest.make(_no_mixed_architectures_test)
 
+def _pkgconfig_deps_for_architecture_test(ctx):
+    env = unittest.begin(ctx)
+
+    packages = {
+        "/repo/libfoo:amd64=1.0": {"architecture": "amd64"},
+        "/repo/libfoo:arm64=1.0": {"architecture": "arm64"},
+        "/repo/libbar:all=1.0": {"architecture": "all"},
+    }
+    package = {"depends_on": packages.keys()}
+
+    # A multi-architecture lock must expose only the selected architecture's
+    # metadata plus architecture-independent dependencies, in the same repo
+    # mode as the package's data target.
+    for architecture in ["amd64", "arm64"]:
+        for mergedusr in [False, True]:
+            suffix = "_mergedusr" if mergedusr else ""
+            asserts.equals(env, [
+                "@repo_libfoo-%s_1.0%s//:pkgconfig" % (architecture, suffix),
+                "@repo_libbar-all_1.0%s//:pkgconfig" % suffix,
+            ], package_deps_for_architecture(
+                packages,
+                package,
+                architecture,
+                mergedusr = mergedusr,
+                target = "pkgconfig",
+            ))
+
+    return unittest.end(env)
+
+pkgconfig_deps_for_architecture_test = unittest.make(_pkgconfig_deps_for_architecture_test)
+
 # Regression test for commit "Add mergedusr support to apt.install()": package
 # repo names must be distinguishable per mergedusr mode so that the same
 # package can be materialized both with and without mergedusr normalization
@@ -151,6 +182,7 @@ check_template_variable_collision_test = unittest.make(_check_template_variable_
 
 def translate_dependency_set_tests():
     no_mixed_architectures_test(name = _TEST_SUITE_PREFIX + "no_mixed_architectures")
+    pkgconfig_deps_for_architecture_test(name = _TEST_SUITE_PREFIX + "pkgconfig_deps_for_architecture")
     package_repo_name_modes_test(name = _TEST_SUITE_PREFIX + "package_repo_name_modes")
     resolve_package_template_test(name = _TEST_SUITE_PREFIX + "resolve_package_template")
     check_template_variable_collision_test(name = _TEST_SUITE_PREFIX + "check_template_variable_collision")

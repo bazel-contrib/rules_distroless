@@ -71,6 +71,15 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "pkgconfig",
+    srcs = select({{
+        "//:linux_%s" % arch: ["//%s/%s:pkgconfig" % (package, arch) for package in packages]
+        for arch, packages in _PACKAGES.items()
+    }}) if _PACKAGES else [],
+    visibility = ["//visibility:public"],
+)
+
 
 # A filegroup that contains all the packages and the dpkg status file.
 filegroup(
@@ -116,6 +125,12 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+alias(
+    name = "pkgconfig",
+    actual = select({pkgconfig_targets}, no_match_error = NO_MATCH_ERROR),
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "{target_name}",
     srcs = select({deps}, no_match_error = NO_MATCH_ERROR) + [":data"],
@@ -133,7 +148,17 @@ alias(
 )
 """
 
-# Computes the `@repo//:data` labels a package's per-architecture BUILD.bazel
+# Generated independently of package templates so custom templates do not need
+# to provide a pkgconfig target or add new template variables.
+_PACKAGE_PKGCONFIG_TEMPLATE = """
+filegroup(
+    name = "pkgconfig",
+    srcs = {srcs},
+    visibility = ["//visibility:public"],
+)
+"""
+
+# Computes the `@repo//:<target>` labels a package's per-architecture BUILD.bazel
 # should depend on for the given architecture.
 #
 # Avoids mixing architectures: a dependency is only included if it was built
@@ -141,9 +166,9 @@ alias(
 # this scoping, a package's `depends_on` (which spans every architecture the
 # lockfile knows about) would leak foreign-architecture deps into a single
 # architecture's target, causing file duplication that confuses `flatten`.
-def package_deps_for_architecture(packages, package, architecture, mergedusr = False):
+def package_deps_for_architecture(packages, package, architecture, mergedusr = False, target = "data"):
     return [
-        "@" + util.package_repo_name(dep_key, mergedusr = mergedusr) + "//:data"
+        "@" + util.package_repo_name(dep_key, mergedusr = mergedusr) + "//:" + target
         for dep_key in package["depends_on"]
         if packages[dep_key]["architecture"] in [architecture, "all"]
     ]
@@ -278,7 +303,15 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
 
             rctx.file(
                 "%s/%s/BUILD.bazel" % (package["name"], architecture),
-                tmpl.format(**format_vars),
+                tmpl.format(**format_vars) + _PACKAGE_PKGCONFIG_TEMPLATE.format(
+                    srcs = ["@%s//:pkgconfig" % repo_name] + package_deps_for_architecture(
+                        packages,
+                        package,
+                        architecture,
+                        mergedusr = rctx.attr.mergedusr,
+                        target = "pkgconfig",
+                    ),
+                ),
             )
 
     for (_, info) in packages_to_architectures.items():
@@ -307,6 +340,10 @@ Please unify the versions manually, or use separate `apt.install` calls (with di
                 }),
                 control_targets = starlark_codegen_utils.to_dict_attr({
                     "//:linux_%s" % architecture: "//%s/%s:control" % (package_name, architecture)
+                    for architecture in architectures
+                }),
+                pkgconfig_targets = starlark_codegen_utils.to_dict_attr({
+                    "//:linux_%s" % architecture: "//%s/%s:pkgconfig" % (package_name, architecture)
                     for architecture in architectures
                 }),
                 deps = starlark_codegen_utils.to_dict_list_attr({

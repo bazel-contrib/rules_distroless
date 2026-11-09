@@ -7,15 +7,22 @@ TAR_TOOLCHAIN_TYPE = tar.toolchain_type
 def _deb_export_impl(ctx):
     bsdtar = ctx.toolchains[TAR_TOOLCHAIN_TYPE]
 
-    foreign_symlinks = {
-        symlink: json.decode(indices_json)
-        for (symlink, indices_json) in ctx.attr.foreign_symlinks.items()
+    files_by_name = {
+        label.name: output
+        for label, output in zip(ctx.attr.outs + ctx.attr.symlink_outs, ctx.outputs.outs + ctx.outputs.symlink_outs)
     }
+    for symlink, target in ctx.attr.local_symlinks.items():
+        ctx.actions.symlink(
+            output = files_by_name[symlink],
+            target_file = files_by_name[target],
+        )
 
     # foreign_symlinks maps label -> index string (reversed for Bazel 7.0.0 compatibility)
+    foreign_symlink_outs = []
     for (target, indices_json) in ctx.attr.foreign_symlinks.items():
         indices = json.decode(indices_json)
         for i in indices:
+            foreign_symlink_outs.append(ctx.outputs.symlink_outs[i])
             ctx.actions.symlink(
                 output = ctx.outputs.symlink_outs[i],
                 # grossly inefficient
@@ -40,7 +47,9 @@ def _deb_export_impl(ctx):
             # the archive may contain symlinks that point to symlinks that reference
             # files from other packages, therefore symlink_outs must be present in the
             # sandbox for Bazel to succesfully track them.
-            inputs = ctx.files.srcs + ctx.outputs.symlink_outs,
+            # Local aliases depend on these extracted outputs and must not be
+            # inputs to their own targets' extraction action.
+            inputs = ctx.files.srcs + foreign_symlink_outs,
             outputs = ctx.outputs.outs,
             arguments = [args],
             mnemonic = "Unpack",
@@ -61,6 +70,7 @@ deb_export = rule(
         "srcs": attr.label_list(allow_files = True),
         # mapping of foreign label -> symlink_outs index (label_keyed for Bazel 7.0 compat)
         "foreign_symlinks": attr.label_keyed_string_dict(allow_files = True),
+        "local_symlinks": attr.string_dict(doc = "Maps local symlink output names to targets in outs or symlink_outs."),
         "symlink_outs": attr.output_list(),
         "outs": attr.output_list(),
     },

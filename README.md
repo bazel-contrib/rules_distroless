@@ -52,6 +52,28 @@ git_override(
 )
 ```
 
+## pkg-config metadata
+
+Configure scripts can consume the original `.pc` files from the same packages
+that supply their Bazel library dependencies. For a dependency set named
+`bookworm`, the generated public targets are:
+
+| Target | Files |
+| --- | --- |
+| `@bookworm//:pkgconfig` | Metadata for the selected architecture's package set |
+| `@bookworm//libfoo-dev:pkgconfig` | Metadata for that package and its dependencies, selected by target platform |
+| `@bookworm//libfoo-dev/amd64:pkgconfig` | The same package closure for an explicit architecture |
+
+These file groups include regular `.pc` files and their symlink aliases from
+library directories and `usr/share/pkgconfig`. Metadata bytes and path variables
+are preserved. Declare the files as action inputs, supply a pkgconf tool, and
+configure its search paths and variable relocation to match the staged libraries
+and headers. Packages without metadata contribute an empty file group.
+
+The `pkgconfig` target is generated independently of `apt.package_template`.
+Custom templates keep their existing required targets and must leave this name
+available for the generated metadata target.
+
 ## GPG / OpenPGP Signature Verification
 
 `rules_distroless` verifies cryptographic OpenPGP signatures on repository indices
