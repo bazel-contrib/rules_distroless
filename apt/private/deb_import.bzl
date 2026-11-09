@@ -1,6 +1,6 @@
 "deb_import"
 
-load(":deb_archive.bzl", "data_archive", "host_bsdtar")
+load(":deb_archive.bzl", "control_archive", "data_archive", "host_bsdtar")
 load(":linker_script.bzl", "linker_script")
 load(":lockfile.bzl", "lockfile")
 load(":pkgconfig.bzl", "pkgconfig")
@@ -26,7 +26,7 @@ deb_postfix(
 
 filegroup(
     name = "control",
-    srcs = glob(["control.tar.*"]),
+    srcs = ["{control_archive}"],
     visibility = ["//visibility:public"],
 )
 
@@ -490,6 +490,7 @@ def _deb_import_impl(rctx):
 
     rctx.file("BUILD.bazel", _DEB_IMPORT_BUILD_TMPL.format(
         mergedusr = rctx.attr.mergedusr,
+        control_archive = control_archive(rctx).basename,
         depends_on = ["@" + util.package_repo_name(dep_key, mergedusr = rctx.attr.mergedusr) + "//:data" for dep_key in rctx.attr.depends_on],
         target_name = rctx.attr.target_name,
         cc_import_targets = cc_import_targets,
