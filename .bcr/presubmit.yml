@@ -1,13 +1,23 @@
 bcr_test_module:
   module_path: "e2e/smoke"
   matrix:
-    platform: ["debian13", "macos", "ubuntu2404"]
+    linux_platform: ["debian13", "ubuntu2404"]
     bazel: [7.x, 8.x]
   tasks:
-    run_tests:
-      name: "Run test module"
+    run_linux_tests:
+      name: "Run test module (Linux)"
       bazel: ${{ bazel }}
-      platform: ${{ platform }}
+      platform: ${{ linux_platform }}
+      test_flags:
+        - "--test_tag_filters=-requires-docker"
+      test_targets:
+        - "//..."
+    run_macos_tests:
+      name: "Run test module (macOS)"
+      bazel: ${{ bazel }}
+      platform: "macos"
+      shell_commands:
+        - "brew install gnupg || brew install sequoia-sqv"
       test_flags:
         - "--test_tag_filters=-requires-docker"
       test_targets:
