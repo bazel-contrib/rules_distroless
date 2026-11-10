@@ -26,7 +26,7 @@ deb_postfix(
 
 filegroup(
     name = "control",
-    srcs = glob(["control.tar.*"]),
+    srcs = glob(["control.tar*"]),
     visibility = ["//visibility:public"],
 )
 
