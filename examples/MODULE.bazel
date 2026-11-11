@@ -142,4 +142,32 @@ apt.install(
 #     ],
 # )
 
-use_repo(apt, "bullseye")
+# Install packages onto a Debian Bullseye image (for debian_base example):
+# only what the image does not already have.
+apt.install(
+    bases = [
+        "@debian_bullseye_linux_amd64//:index.json",
+        "@debian_bullseye_linux_arm64_v8//:index.json",
+    ],
+    dependency_set = "bullseye_on_base",
+    packages = ["curl"],
+    suites = [
+        "bullseye",
+        "bullseye-updates",
+        "bullseye-security",
+    ],
+)
+use_repo(apt, "bullseye", "bullseye_on_base")
+
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "debian_bullseye",
+    digest = "sha256:e5b6442dd2e9684cf5e87d8338b5968f3b348636fc0be6d7850a381e3731a2bd",
+    image = "index.docker.io/library/debian",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+    tag = "bullseye-slim",
+)
+use_repo(oci, "debian_bullseye", "debian_bullseye_linux_amd64", "debian_bullseye_linux_arm64_v8")

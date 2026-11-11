@@ -1,5 +1,7 @@
 "tests for dpkg_status"
 
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//apt/private:dpkg_status.bzl", "dpkg_status")
 load("//distroless/tests:asserts.bzl", "assert_tar_listing")
 
@@ -113,4 +115,58 @@ cd "$$tmpdir"
         expected = """\
 ./var/lib/dpkg/status
 """,
+    )
+
+    # Test with a base status the packages' entries are added to
+    write_file(
+        name = "_dpkg_status_base_file",
+        out = "dpkg_status_base",
+        content = [
+            "Package: base-files",
+            "Status: install ok installed",
+            "Version: 12.4",
+            "Architecture: amd64",
+            "",
+            "",
+        ],
+    )
+
+    dpkg_status(
+        name = "_dpkg_status_base_layer",
+        controls = [":_dpkg_status_single_data"],
+        base = ":_dpkg_status_base_file",
+    )
+
+    native.genrule(
+        name = "_dpkg_status_base_actual",
+        srcs = [":_dpkg_status_base_layer"],
+        outs = ["dpkg_status_base_actual"],
+        cmd = "$(BSDTAR_BIN) -xOf $< ./var/lib/dpkg/status > $@",
+        toolchains = ["@bsd_tar_toolchains//:resolved_toolchain"],
+    )
+
+    write_file(
+        name = "_dpkg_status_base_expected",
+        out = "dpkg_status_base_expected",
+        content = [
+            "Package: base-files",
+            "Status: install ok installed",
+            "Version: 12.4",
+            "Architecture: amd64",
+            "",
+            "Package: test-package",
+            "Status: install ok installed",
+            "Version: 1.0.0",
+            "Architecture: amd64",
+            "Maintainer: Test <test@example.com>",
+            "Description: A test package",
+            "",
+            "",
+        ],
+    )
+
+    diff_test(
+        name = _TEST_SUITE_PREFIX + "base",
+        file1 = ":_dpkg_status_base_actual",
+        file2 = ":_dpkg_status_base_expected",
     )
