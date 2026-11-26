@@ -19,6 +19,10 @@ def _deb_filemap_impl(rctx):
     rctx.file("filemap.json", json.encode(files))
     rctx.file("BUILD.bazel", 'exports_files(["filemap.json"], visibility = ["//visibility:public"])\n')
 
+    # Bazel < 8.3.0 has no repo_metadata.
+    if hasattr(rctx, "repo_metadata"):
+        return rctx.repo_metadata(reproducible = True)
+
 deb_filemap = repository_rule(
     implementation = _deb_filemap_impl,
     attrs = {
